@@ -1,0 +1,633 @@
+openapi: "3.0.3"
+info:
+  title: Ticket Genius API
+  version: "0.1.0"
+  description: Ticketing platform aggregating events from Ticketmaster Discovery API v2
+servers:
+  - url: http://localhost:5000/api/v1
+    description: Development server
+paths:
+  /health:
+    get:
+      summary: Health check
+      tags:
+        - Health
+      responses:
+        '200':
+          description: API is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /orders:
+    post:
+      summary: Create a new order
+      tags:
+        - Orders
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderRequest'
+      responses:
+        '201':
+          description: Order created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderCreatedResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /orders/{order_id}/confirm-payment:
+    post:
+      summary: Confirm payment for an order
+      tags:
+        - Orders
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ConfirmPaymentRequest'
+      responses:
+        '200':
+          description: Payment confirmed successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaymentConfirmedResponse'
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Order or payment not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /orders/{order_id}:
+    get:
+      summary: Get order status
+      tags:
+        - Orders
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Order details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrderStatusResponse'
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    delete:
+      summary: Cancel an order
+      tags:
+        - Orders
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CancelOrderRequest'
+      responses:
+        '204':
+          description: Order cancelled successfully
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+    post:
+      summary: Refund an order
+      tags:
+        - Orders
+      parameters:
+        - name: order_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefundOrderRequest'
+      responses:
+        '204':
+          description: Refund created successfully
+        '400':
+          description: Invalid request data
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '404':
+          description: Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /plans/search:
+    get:
+      summary: Search plans
+      tags:
+        - Plans
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+          description: Search query
+        - name: lat
+          in: query
+          schema:
+            type: number
+          description: Latitude for location-based search
+        - name: lon
+          in: query
+          schema:
+            type: number
+          description: Longitude for location-based search
+        - name: radius_km
+          in: query
+          schema:
+            type: integer
+          description: Search radius in kilometers
+        - name: date_from
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter events from this date
+        - name: date_to
+          in: query
+          schema:
+            type: string
+            format: date
+          description: Filter events to this date
+        - name: min_price
+          in: query
+          schema:
+            type: number
+          description: Minimum price
+        - name: max_price
+          in: query
+          schema:
+            type: number
+          description: Maximum price
+        - name: cursor
+          in: query
+          schema:
+            type: string
+          description: Pagination cursor
+        - name: limit
+          in: query
+          schema:
+            type: integer
+          description: Page size (max 100)
+      responses:
+        '200':
+          description: Search results
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanSearchResponse'
+  /plans/{plan_id}:
+    get:
+      summary: Get plan details
+      tags:
+        - Plans
+      parameters:
+        - name: plan_id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Plan details retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PlanDetailResponse'
+        '404':
+          description: Plan not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+  /admin/sync-plans:
+    post:
+      summary: Sync plans from Ticketmaster
+      tags:
+        - Admin
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                since:
+                  type: string
+                  format: date-time
+                  description: Sync plans modified since this date
+                stale_only:
+                  type: boolean
+                  description: Only sync stale plans
+      responses:
+        '200':
+          description: Sync completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPlansResponse'
+        '400':
+          description: Invalid request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+components:
+  schemas:
+    MoneySchema:
+      type: object
+      required:
+        - amount
+        - currency
+      properties:
+        amount:
+          type: number
+          format: decimal
+        currency:
+          type: string
+          default: EUR
+    SeatSchema:
+      type: object
+      required:
+        - section
+        - row
+        - number
+      properties:
+        section:
+          type: string
+        row:
+          type: string
+        number:
+          type: string
+    AttendeeInfoSchema:
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+    CreateOrderRequest:
+      type: object
+      required:
+        - plan_id
+        - quantity
+        - attendee_info
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 8
+        attendee_info:
+          $ref: '#/components/schemas/AttendeeInfoSchema'
+        seat_ids:
+          type: array
+          items:
+            type: string
+    ConfirmPaymentRequest:
+      type: object
+      required:
+        - payment_intent_id
+        - idempotency_key
+      properties:
+        payment_intent_id:
+          type: string
+        idempotency_key:
+          type: string
+    CancelOrderRequest:
+      type: object
+      required:
+        - reason
+      properties:
+        reason:
+          type: string
+    RefundOrderRequest:
+      type: object
+      properties:
+        amount:
+          $ref: '#/components/schemas/MoneySchema'
+        reason:
+          type: string
+          default: "Customer request"
+    SearchPlansRequest:
+      type: object
+      properties:
+        query:
+          type: string
+        lat:
+          type: number
+        lon:
+          type: number
+        radius_km:
+          type: integer
+          minimum: 1
+          maximum: 500
+        date_from:
+          type: string
+          format: date
+        date_to:
+          type: string
+          format: date
+        min_price:
+          type: number
+        max_price:
+          type: number
+        cursor:
+          type: string
+        limit:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 20
+    OrderCreatedResponse:
+      type: object
+      required:
+        - order_id
+        - payment_intent_id
+        - client_secret
+        - status
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        payment_intent_id:
+          type: string
+        client_secret:
+          type: string
+        status:
+          type: string
+    PaymentConfirmedResponse:
+      type: object
+      required:
+        - order_id
+        - payment_id
+        - status
+        - provider_ref
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        payment_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+        provider_ref:
+          type: string
+    OrderStatusResponse:
+      type: object
+      required:
+        - order_id
+        - plan_id
+        - plan_name
+        - status
+        - quantity
+        - total_amount
+        - currency
+        - seats
+        - payment_id
+        - created_at
+        - updated_at
+      properties:
+        order_id:
+          type: string
+          format: uuid
+        plan_id:
+          type: string
+          format: uuid
+        plan_name:
+          type: string
+        status:
+          type: string
+        quantity:
+          type: integer
+        total_amount:
+          type: number
+        currency:
+          type: string
+        seats:
+          type: array
+          items:
+            type: object
+        payment_id:
+          type: string
+          format: uuid
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    PlanSummaryResponse:
+      type: object
+      required:
+        - plan_id
+        - tm_plan_id
+        - name
+        - url
+        - start_date
+        - start_time
+        - timezone
+        - venue_name
+        - venue_city
+        - venue_state
+        - min_price
+        - max_price
+        - currency
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        tm_plan_id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        image_url:
+          type: string
+        start_date:
+          type: string
+        start_time:
+          type: string
+        timezone:
+          type: string
+        venue_name:
+          type: string
+        venue_city:
+          type: string
+        venue_state:
+          type: string
+        min_price:
+          type: number
+        max_price:
+          type: number
+        currency:
+          type: string
+    PlanDetailResponse:
+      type: object
+      required:
+        - plan_id
+        - tm_plan_id
+        - name
+        - url
+        - image_url
+        - date_range
+        - venue_name
+        - venue_city
+        - venue_state
+        - min_price
+        - max_price
+        - currency
+        - seat_map
+      properties:
+        plan_id:
+          type: string
+          format: uuid
+        tm_plan_id:
+          type: string
+        name:
+          type: string
+        url:
+          type: string
+        image_url:
+          type: string
+        date_range:
+          type: object
+        venue_name:
+          type: string
+        venue_city:
+          type: string
+        venue_state:
+          type: string
+        min_price:
+          type: number
+        max_price:
+          type: number
+        currency:
+          type: string
+        seat_map:
+          type: array
+          items:
+            type: object
+    PlanSearchResponse:
+      type: object
+      required:
+        - plans
+        - cursor
+        - has_more
+      properties:
+        plans:
+          type: array
+          items:
+            $ref: '#/components/schemas/PlanSummaryResponse'
+        cursor:
+          type: string
+        has_more:
+          type: boolean
+    SyncPlansResponse:
+      type: object
+      required:
+        - synced_count
+        - message
+      properties:
+        synced_count:
+          type: integer
+        message:
+          type: string
+    ErrorResponse:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - detail
+        - instance
+      properties:
+        type:
+          type: string
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        instance:
+          type: string
