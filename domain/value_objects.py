@@ -11,7 +11,7 @@ class Currency(str, Enum):
     GBP = "GBP"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Money:
     amount: Decimal
     currency: Currency = Currency.EUR
@@ -23,6 +23,9 @@ class Money:
             raise ValueError("Money amount cannot be negative")
         if self.amount.as_tuple().exponent < -2:
             raise ValueError("Money amount cannot have more than 2 decimal places")
+
+    def __composite_values__(self):
+        return (self.amount, self.currency)
 
     def __add__(self, other: "Money") -> "Money":
         if self.currency != other.currency:
@@ -41,7 +44,7 @@ class Money:
         return f"Money({self.amount:.2f} {self.currency.value})"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class Seat:
     section: str
     row: str
@@ -51,11 +54,50 @@ class Seat:
         if not self.section or not self.row or not self.number:
             raise ValueError("Seat section, row, and number are required")
 
+    def __composite_values__(self):
+        return (self.section, self.row, self.number)
+
     def __repr__(self) -> str:
         return f"Seat(section={self.section}, row={self.row}, number={self.number})"
 
+    def to_id(self) -> "SeatId":
+        """Convert to SeatId."""
+        return SeatId(self.section, self.row, self.number)
 
-@dataclass(frozen=True, slots=True)
+    @classmethod
+    def from_id(cls, seat_id: "SeatId") -> "Seat":
+        """Create Seat from SeatId."""
+        return cls(section=seat_id.section, row=seat_id.row, number=seat_id.number)
+
+
+@dataclass(frozen=True)
+class SeatId:
+    """Immutable seat identifier in format 'section-row-number'."""
+    section: str
+    row: str
+    number: str
+
+    def __post_init__(self):
+        if not self.section or not self.row or not self.number:
+            raise ValueError("SeatId section, row, and number are required")
+
+    def __str__(self) -> str:
+        return f"{self.section}-{self.row}-{self.number}"
+
+    @classmethod
+    def from_string(cls, s: str) -> "SeatId":
+        """Parse SeatId from string format 'section-row-number'."""
+        parts = s.split("-")
+        if len(parts) != 3:
+            raise ValueError(f"Invalid SeatId format: {s}. Expected 'section-row-number'")
+        return cls(section=parts[0], row=parts[1], number=parts[2])
+
+    def to_seat(self) -> Seat:
+        """Convert to Seat value object."""
+        return Seat(section=self.section, row=self.row, number=self.number)
+
+
+@dataclass(frozen=True)
 class DateRange:
     start: datetime
     end: datetime
@@ -67,11 +109,14 @@ class DateRange:
         if not self.timezone:
             raise ValueError("DateRange timezone is required")
 
+    def __composite_values__(self):
+        return (self.start, self.end, self.timezone)
+
     def __repr__(self) -> str:
         return f"DateRange(start={self.start.isoformat()}, end={self.end.isoformat()}, tz={self.timezone})"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class TicketQuantity:
     value: int
 
@@ -83,7 +128,7 @@ class TicketQuantity:
         return f"TicketQuantity({self.value})"
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass
 class AttendeeInfo:
     name: str
     email: str
@@ -95,5 +140,8 @@ class AttendeeInfo:
         if not self.email or "@" not in self.email:
             raise ValueError("Valid attendee email is required")
 
+    def __composite_values__(self):
+        return (self.name, self.email, self.phone)
+
     def __repr__(self) -> str:
-        return f"AttendeeInfo(name={self.name}, email={self.email})"
+        return f"AttendeeInfo(name={self.name}, email={self.email}, phone={self.phone})"

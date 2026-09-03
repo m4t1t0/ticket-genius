@@ -2,10 +2,10 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, List
 from uuid import UUID, uuid4
 
-from domain.value_objects import Money, Currency, TicketQuantity, AttendeeInfo, Seat
+from domain.value_objects import Money, Currency, TicketQuantity, AttendeeInfo, Seat, SeatId
 from domain.models import Order, Payment, Plan
 from domain.events import (
     OrderCreated, PaymentInitiated, PaymentConfirmed,
@@ -23,7 +23,7 @@ class CreateOrderCommand:
     plan_id: UUID
     quantity: int
     attendee_info: AttendeeInfo
-    seat_ids: list[str] = None  # Will be validated against plan
+    seat_ids: List[SeatId] = None  # Will be validated against plan
 
 
 @dataclass

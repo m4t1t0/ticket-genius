@@ -37,7 +37,7 @@ pip install -r requirements.txt
 - Architecture: Cosmic Python (DDD + Hexagonal + CQRS + Event-Driven/Outbox)
 - Database: PostgreSQL with SQLAlchemy Imperative Mapping + Alembic migrations
 - Caching: Redis for Ticketmaster rate limit mitigation and read performance
-- Message Bus: Outbox pattern with background worker (Kafka-ready)
+- Message Bus: Outbox pattern with deferred background worker (Kafka-ready) — see ADR-0002
 - Testing: pytest with unit, integration, and contract tests
 - No CI/CD workflows configured yet
 - Default port: 5000 (configurable via `invoke start --port=8080`)

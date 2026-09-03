@@ -3,8 +3,6 @@ from datetime import datetime, timezone
 from typing import Optional, List, Dict
 from uuid import UUID, uuid4
 
-from domain.value_objects import AttendeeInfo, Money
-
 
 @dataclass(frozen=True, slots=True)
 class DomainEvent:
@@ -24,7 +22,10 @@ class OrderCreated:
     plan_id: UUID = field(default_factory=uuid4)
     quantity: int = 0
     total_amount: Money = field(default_factory=lambda: Money(amount=0))
-    attendee_info: Optional[AttendeeInfo] = None
+    # Attendee info as primitives for serialization
+    attendee_name: str = ""
+    attendee_email: str = ""
+    attendee_phone: Optional[str] = None
 
 
 @dataclass(frozen=True, slots=True)

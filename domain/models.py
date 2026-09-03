@@ -1,7 +1,8 @@
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from enum import Enum
 from typing import List, Optional
-from uuid import UUID, uuid4
+from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
 
 from domain.events import (
     DomainEvent, OrderCreated, PaymentInitiated, PaymentConfirmed,
@@ -25,7 +26,7 @@ class AggregateRoot:
         self._domain_events.clear()
 
 
-class OrderStatus(str):
+class OrderStatus(str, Enum):
     PENDING = "PENDING"
     SEATS_RESERVED = "SEATS_RESERVED"
     PAYMENT_INITIATED = "PAYMENT_INITIATED"
@@ -42,13 +43,13 @@ class Order(AggregateRoot):
     quantity: TicketQuantity
     total_amount: Money
     attendee_info: AttendeeInfo
-    status: str = OrderStatus.PENDING
+    status: OrderStatus = OrderStatus.PENDING
     payment_id: Optional[UUID] = None
     seats: List[Seat] = field(default_factory=list)
     version: int = 1
 
     def __post_init__(self):
-        if self.status not in OrderStatus.__dict__.values():
+        if not isinstance(self.status, OrderStatus):
             raise ValueError(f"Invalid order status: {self.status}")
         # Initialize domain events list for dataclass inheritance
         if not hasattr(self, '_domain_events'):
@@ -75,7 +76,9 @@ class Order(AggregateRoot):
                 plan_id=plan_id,
                 quantity=quantity.value,
                 total_amount=total_amount,
-                attendee_info=attendee_info,
+                attendee_name=attendee_info.name,
+                attendee_email=attendee_info.email,
+                attendee_phone=attendee_info.phone,
             )
         )
         return order
@@ -136,7 +139,7 @@ class Order(AggregateRoot):
         return f"Order(id={self.order_id}, plan={self.plan_id}, status={self.status}, version={self.version})"
 
 
-class PaymentStatus(str):
+class PaymentStatus(str, Enum):
     CREATED = "CREATED"
     AUTHORIZED = "AUTHORIZED"
     CAPTURED = "CAPTURED"
@@ -151,13 +154,13 @@ class Payment(AggregateRoot):
     order_id: UUID
     amount: Money
     provider: str
-    status: str = PaymentStatus.CREATED
+    status: PaymentStatus = PaymentStatus.CREATED
     provider_ref: Optional[str] = None
     intent_id: Optional[str] = None
     version: int = 1
 
     def __post_init__(self):
-        if self.status not in PaymentStatus.__dict__.values():
+        if not isinstance(self.status, PaymentStatus):
             raise ValueError(f"Invalid payment status: {self.status}")
         if not hasattr(self, '_domain_events'):
             self._domain_events = []
@@ -214,7 +217,7 @@ class Payment(AggregateRoot):
 @dataclass
 class Plan(AggregateRoot):
     plan_id: UUID
-    tm_plan_id: str
+    _tm_plan_id: str  # Private: used for ORM mapping, not part of domain API
     name: str
     url: str
     image_url: Optional[str]
@@ -227,18 +230,60 @@ class Plan(AggregateRoot):
     last_synced_at: datetime
     tm_last_modified: datetime
     version: int = 1
+    seat_prices_json: dict = field(default_factory=dict)  # JSON column storage
 
     def __post_init__(self):
-        if not self.tm_plan_id:
+        if not self._tm_plan_id:
             raise ValueError("tm_plan_id is required")
         if not hasattr(self, '_domain_events'):
             self._domain_events = []
+
+    @property
+    def tm_plan_id(self) -> str:
+        """Internal accessor for repository/ORM mapping."""
+        return self._tm_plan_id
+
+    @property
+    def seat_prices(self) -> dict:
+        """Get seat prices as dict of section -> Money.
+        
+        Converts from JSON storage format (price_cents) to domain format (Money).
+        """
+        result = {}
+        for section, price_cents in self.seat_prices_json.items():
+            result[section] = Money(amount=Decimal(price_cents) / 100, currency=Currency.EUR)
+        return result
+
+    @seat_prices.setter
+    def seat_prices(self, value: dict):
+        """Set seat prices from domain format (Money) to JSON storage format (price_cents)."""
+        self.seat_prices_json = {
+            section: int(price.amount * 100) for section, price in value.items()
+        }
+
+    def get_seat_price(self, seat: Seat) -> Money:
+        """Get price for a specific seat.
+        
+        Falls back to min_price if no specific section pricing available.
+        """
+        section_price = self.seat_prices.get(seat.section)
+        if section_price:
+            return section_price
+        return self.min_price
+
+    def calculate_total_for_seats(self, seats: List[Seat]) -> Money:
+        """Calculate total price for a list of seats."""
+        total = Money(Decimal('0'), self.min_price.currency)
+        for seat in seats:
+            total = total + self.get_seat_price(seat)
+        return total
 
     @classmethod
     def from_ticketmaster(cls, tm_data: dict) -> "Plan":
         from domain.value_objects import DateRange, Money, Currency
         from datetime import datetime
         from decimal import Decimal
+        from uuid import UUID, uuid5, NAMESPACE_URL
 
         # Parse TM date
         start_str = tm_data["dates"]["start"]["dateTime"]
@@ -252,9 +297,13 @@ class Plan(AggregateRoot):
         min_price = Money(Decimal(str(price_range.get("min", 0))), Currency.EUR)
         max_price = Money(Decimal(str(price_range.get("max", 0))), Currency.EUR)
 
+        # Deterministic UUID based on TM plan ID for idempotent upsert
+        tm_plan_id = tm_data["id"]
+        plan_id = uuid5(NAMESPACE_URL, f"ticketmaster.com/events/{tm_plan_id}")
+
         return cls(
-            plan_id=uuid4(),
-            tm_plan_id=tm_data["id"],
+            plan_id=plan_id,
+            _tm_plan_id=tm_plan_id,
             name=tm_data["name"],
             url=tm_data["url"],
             image_url=tm_data["images"][0]["url"] if tm_data.get("images") else None,
@@ -264,28 +313,12 @@ class Plan(AggregateRoot):
             venue_state=tm_data["_embedded"]["venues"][0]["state"]["name"],
             min_price=min_price,
             max_price=max_price,
+            seat_prices_json={},  # TM doesn't provide per-section pricing
             last_synced_at=datetime.now(timezone.utc),
             tm_last_modified=datetime.fromisoformat(tm_data["lastUpdated"].replace("Z", "+00:00")),
         )
 
-    def update_from_ticketmaster(self, tm_data: dict) -> None:
-        from decimal import Decimal
-        self.name = tm_data["name"]
-        self.url = tm_data["url"]
-        self.image_url = tm_data["images"][0]["url"] if tm_data.get("images") else None
-        self.venue_name = tm_data["_embedded"]["venues"][0]["name"]
-        self.venue_city = tm_data["_embedded"]["venues"][0]["city"]["name"]
-        self.venue_state = tm_data["_embedded"]["venues"][0]["state"]["name"]
-        price_range = tm_data.get("priceRanges", [{}])[0]
-        self.min_price = Money(Decimal(str(price_range.get("min", 0))), Currency.EUR)
-        self.max_price = Money(Decimal(str(price_range.get("max", 0))), Currency.EUR)
-        self.last_synced_at = datetime.now(timezone.utc)
-        self.tm_last_modified = datetime.fromisoformat(tm_data["lastUpdated"].replace("Z", "+00:00"))
-        self.version += 1
-
-    def is_stale(self, threshold_hours: int = 24) -> bool:
-        from datetime import timedelta
-        return (datetime.now(timezone.utc) - self.last_synced_at) > timedelta(hours=threshold_hours)
+    
 
     def __repr__(self) -> str:
-        return f"Plan(id={self.plan_id}, tm_id={self.tm_plan_id}, name={self.name}, version={self.version})"
+        return f"Plan(id={self.plan_id}, tm_id={self._tm_plan_id}, name={self.name}, version={self.version})"

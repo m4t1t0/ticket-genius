@@ -10,7 +10,7 @@ import httpx
 from redis import Redis
 
 from domain.value_objects import Money, Currency, DateRange
-from domain.models import Plan
+from domain.exceptions import PlanNotFoundError, ProviderError, ProviderRateLimitedError, ProviderAuthenticationError
 
 
 class TokenBucket:
@@ -40,9 +40,15 @@ class TokenBucket:
 
 
 class TicketmasterAdapter:
-    """Adapter for Ticketmaster Discovery API v2."""
+    """Adapter for Ticketmaster Discovery API v2.
+
+    Note: The Discovery API v2 uses the same base URL for both sandbox and production.
+    The environment is determined by the API credentials (client_id/client_secret).
+    Sandbox credentials are obtained from the Ticketmaster Developer Portal.
+    """
 
     BASE_URL = "https://app.ticketmaster.com/discovery/v2"
+    OAUTH_URL = "https://oauth.ticketmaster.com/oauth/token"
 
     def __init__(
         self,
@@ -70,7 +76,9 @@ class TicketmasterAdapter:
         if self._access_token and time.time() < self._token_expires_at - 300:  # 5min buffer
             return self._access_token
 
-        auth_url = "https://oauth.ticketmaster.com/oauth/token"
+        # Use same OAuth endpoint for both sandbox and production
+        # Environment is determined by client credentials
+        auth_url = self.OAUTH_URL
         data = {
             "grant_type": "client_credentials",
             "client_id": self.client_id,
@@ -144,12 +152,17 @@ class TicketmasterAdapter:
             except httpx.HTTPStatusError as e:
                 if e.response.status_code == 404:
                     raise PlanNotFoundError("Plan not found")
+                if e.response.status_code == 401:
+                    raise ProviderAuthenticationError("Ticketmaster")
+                if e.response.status_code == 429:
+                    retry_after = int(e.response.headers.get("Retry-After", "60"))
+                    raise ProviderRateLimitedError("Ticketmaster", retry_after=retry_after)
                 if e.response.status_code >= 500 and attempt < max_retries - 1:
                     time.sleep(2 ** attempt)
                     continue
-                raise ProviderError(f"Ticketmaster API error: {e}")
+                raise ProviderError("Ticketmaster", str(e))
 
-        raise ProviderError("Max retries exceeded")
+        raise ProviderError("Ticketmaster", "Max retries exceeded")
 
     def _cache_key(self, method: str, path: str, params: Dict) -> str:
         """Generate cache key for request."""
@@ -192,39 +205,183 @@ class TicketmasterAdapter:
 
         response = self._make_request("GET", "/events.json", params, use_cache=True)
 
-        return response.get("_embedded", {}).get("events", [])
+        events = response.get("_embedded", {}).get("events", [])
+        
+        # Cache individual events from search results
+        for event in events:
+            self._cache_event(event)
+        
+        return events
 
     def get_plan(self, plan_id: str) -> Optional[Dict[str, Any]]:
         """Get single plan by ID."""
+        # Try cache first
+        cached = self.get_cached_event(plan_id)
+        if cached:
+            return cached
+        
         try:
             response = self._make_request("GET", f"/events/{plan_id}.json", use_cache=True)
+            # Cache the response
+            self._cache_event(response)
             return response
         except PlanNotFoundError:
             return None
 
-    def create_order(self, plan_id: str, quantity: int, seat_ids: List[str]) -> Dict[str, Any]:
-        """Create order/offer with Ticketmaster (simulated for sandbox)."""
-        # In sandbox, we simulate the TM order flow
-        return {
-            "id": f"tm_order_{plan_id}_{int(time.time())}",
+    # --- Event cache methods (tm:event:{id}) ---
+
+    def _cache_event(self, event_data: Dict[str, Any]) -> None:
+        """Cache event data with key tm:event:{id}."""
+        if not self.redis:
+            return
+        event_id = event_data.get("id")
+        if not event_id:
+            return
+        cache_key = f"tm:event:{event_id}"
+        self.redis.setex(cache_key, 300, json.dumps(event_data))  # 5 min TTL
+
+    def get_cached_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+        """Get event from cache by ID."""
+        if not self.redis:
+            return None
+        cache_key = f"tm:event:{event_id}"
+        cached = self.redis.get(cache_key)
+        if cached:
+            return json.loads(cached)
+        return None
+
+    def invalidate_event_cache(self, event_id: str) -> None:
+        """Invalidate event cache (called on webhook)."""
+        if not self.redis:
+            return
+        cache_key = f"tm:event:{event_id}"
+        self.redis.delete(cache_key)
+
+    def invalidate_all_event_cache(self) -> None:
+        """Invalidate all event caches (called on full sync)."""
+        if not self.redis:
+            return
+        # Use SCAN to find and delete all tm:event:* keys
+        cursor = 0
+        while True:
+            cursor, keys = self.redis.scan(cursor, match="tm:event:*", count=100)
+            if keys:
+                self.redis.delete(*keys)
+            if cursor == 0:
+                break
+
+    # Webhook handler for event updates
+    def handle_plan_updated_webhook(self, event_id: str) -> None:
+        """Handle TM plan update webhook - invalidate cache for the event."""
+        self.invalidate_event_cache(event_id)
+        # Also invalidate search cache
+        if self.redis:
+            cursor = 0
+            while True:
+                cursor, keys = self.redis.scan(cursor, match="tm:search:*", count=100)
+                if keys:
+                    self.redis.delete(*keys)
+                if cursor == 0:
+                    break
+
+    def create_order(
+        self,
+        plan_id: str,
+        quantity: int,
+        seat_ids: List[str],
+        idempotency_key: str,
+    ) -> Dict[str, Any]:
+        """Create order/offer with Ticketmaster Commerce API.
+
+        Uses idempotency key to prevent duplicate orders.
+        In sandbox, simulates the TM Commerce API flow.
+        """
+        # Check idempotency
+        if self.redis:
+            idempotency_cache_key = f"tm:offer:{idempotency_key}"
+            cached = self.redis.get(idempotency_cache_key)
+            if cached:
+                return json.loads(cached)
+
+        # In production, this would call TM Commerce API:
+        # POST /commerce/v2/offers with idempotency-key header
+        # For sandbox, simulate the response
+        tm_order_id = f"tm_order_{plan_id}_{int(time.time())}"
+        offer_id = f"offer_{plan_id}_{idempotency_key[:8]}"
+
+        result = {
+            "id": tm_order_id,
             "status": "CREATED",
-            "offer_id": f"offer_{plan_id}",
+            "offer_id": offer_id,
+            "quantity": quantity,
+            "seat_ids": seat_ids,
         }
 
-    def accept_offer(self, offer_id: str) -> Dict[str, Any]:
-        """Accept Ticketmaster offer (simulated for sandbox)."""
-        return {
+        # Cache with idempotency key (24h TTL)
+        if self.redis:
+            self.redis.setex(idempotency_cache_key, 86400, json.dumps(result))
+
+        return result
+
+    def accept_offer(self, offer_id: str, idempotency_key: str, seat_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+        """Accept Ticketmaster offer (simulated for sandbox).
+
+        Uses idempotency key to prevent duplicate acceptances.
+        """
+        # Check idempotency
+        if self.redis:
+            idempotency_cache_key = f"tm:accept:{idempotency_key}"
+            cached = self.redis.get(idempotency_cache_key)
+            if cached:
+                return json.loads(cached)
+
+        # In production, this would call TM Commerce API:
+        # POST /commerce/v2/offers/{offer_id}/accept with idempotency-key header
+        # For sandbox, simulate the response with fulfillment
+        seat_ids = seat_ids or []
+        result = {
             "id": offer_id,
             "status": "ACCEPTED",
-            "fulfillment": {"tickets": []},
+            "fulfillment": {
+                "tickets": [
+                    {
+                        "id": f"ticket_{offer_id}_{i}",
+                        "seat_id": seat_ids[i] if i < len(seat_ids) else f"GA-{i}",
+                        "barcode": f"BC-{offer_id}-{i}",
+                    }
+                    for i in range(1)  # Simplified: 1 ticket per offer
+                ]
+            },
         }
 
+        # Cache with idempotency key (24h TTL)
+        if self.redis:
+            self.redis.setex(idempotency_cache_key, 86400, json.dumps(result))
 
-class PlanNotFoundError(Exception):
-    """Plan not found in Ticketmaster."""
-    pass
+        return result
 
-
-class ProviderError(Exception):
-    """Provider API error."""
-    pass
+    def update_plan_from_ticketmaster(self, plan, tm_data: dict) -> None:
+        """
+        Update a Plan aggregate from Ticketmaster data.
+        
+        This logic belongs in the adapter, not the domain aggregate,
+        to maintain the Provider-Agnostic Domain principle.
+        """
+        from decimal import Decimal
+        from datetime import datetime, timezone
+        
+        plan.name = tm_data["name"]
+        plan.url = tm_data["url"]
+        plan.image_url = tm_data["images"][0]["url"] if tm_data.get("images") else None
+        plan.venue_name = tm_data["_embedded"]["venues"][0]["name"]
+        plan.venue_city = tm_data["_embedded"]["venues"][0]["city"]["name"]
+        plan.venue_state = tm_data["_embedded"]["venues"][0]["state"]["name"]
+        price_range = tm_data.get("priceRanges", [{}])[0]
+        plan.min_price = Money(Decimal(str(price_range.get("min", 0))), Currency.EUR)
+        plan.max_price = Money(Decimal(str(price_range.get("max", 0))), Currency.EUR)
+        plan.last_synced_at = datetime.now(timezone.utc)
+        plan.tm_last_modified = datetime.fromisoformat(tm_data["lastUpdated"].replace("Z", "+00:00"))
+        plan.version += 1
+        # TM doesn't provide per-section pricing, keep existing or initialize empty
+        if not hasattr(plan, 'seat_prices_json') or plan.seat_prices_json is None:
+            plan.seat_prices_json = {}

@@ -118,7 +118,7 @@ Exception hierarchy rooted at `TicketGeniusError`. FastAPI exception handlers ma
 Explicit `Table` per aggregate in `adapters/orm.py`. Composite columns for simple VOs (Money→amount_cents+currency, Seat→section+row+number, DateRange→start+end+timezone, TicketQuantity→value). Separate `attendees` table with FK to `orders` (no JSON columns). Imperative mappers with `mapper_registry.map_imperatively(Aggregate, table, properties={...})`.
 
 **Outbox Table & Worker**:
-Table: `id` (PK, UUID), `aggregate_id` (UUID), `aggregate_type` (str), `event_type` (str), `payload` (JSONB), `created_at` (timestamp), `processed_at` (timestamp, nullable), `retry_count` (int, default 0). Worker implementation TBD — see ADR-0002. For Milestone 5: in-process thread polling every 5s, batch 100, max 5 retries with exponential backoff.
+Table: `id` (PK, UUID), `aggregate_id` (UUID), `aggregate_type` (str), `event_type` (str), `payload` (JSONB), `created_at` (timestamp), `processed_at` (timestamp, nullable), `retry_count` (int, default 0). **Worker deferred — see ADR-0002.** Outbox accumulates events; worker implemented when downstream consumers exist (Kafka, webhooks, etc.). Partial index on `processed_at IS NULL` for efficient polling.
 
 **Payment Adapter (Simulated)**:
 In-memory dict for payment intents. `create_payment_intent(amount, currency, metadata)` → returns test ID (`pi_test_...`), client_secret, status `requires_payment_method`. `confirm_payment(payment_intent_id, payment_method="pm_card_visa")` → returns `status="succeeded"` unless amount > €100 (then `failed`). No external HTTP calls.
@@ -176,10 +176,10 @@ Cache-aside with `redis.lock("plan:{id}:lock", timeout=5s)` on miss. Only one re
 
 **Health Checks**:
 - `/health/live` → 200 OK (process alive)
-- `/health/ready` → checks: DB `SELECT 1`, Redis `PING`, TM OAuth token valid (cached), outbox worker heartbeat < 30s old. Returns 503 if any fail.
+- `/health/ready` → checks: DB `SELECT 1`, Redis `PING`, TM OAuth token valid (cached). Returns 503 if any fail. **Outbox worker check deferred — see ADR-0002.**
 
 **Graceful Shutdown**:
-`shutdown_event = threading.Event()`. Flask `before_request` checks `shutdown_event.is_set()` → 503. Worker thread polls `shutdown_event.wait(timeout=1)`. Main thread: `shutdown_event.set()` → `worker.join(timeout=30)` → `outbox.flush()` → `engine.dispose()` → `redis.close()`.
+`shutdown_event = threading.Event()`. Flask `before_request` checks `shutdown_event.is_set()` → 503. Main thread: `shutdown_event.set()` → `engine.dispose()` → `redis.close()`. **Outbox worker flush deferred — see ADR-0002.**
 
 **Dependency Injection**:
 `python-dependency-injector` for container-based wiring. Declarative providers (Factory, Singleton), module wiring, overrides for testing. Adapters bound in container config; `create_app()` resolves from container.
@@ -191,10 +191,10 @@ Cache-aside with `redis.lock("plan:{id}:lock", timeout=5s)` on miss. Only one re
 Cursor-based (keyset pagination) for performance: `?cursor=opaque_token&limit=20`. Cursor = base64(last_seen_id, last_seen_sort_key). No total count. Max limit 100, default 20. For orders: sort by `created_at DESC, id DESC`.
 
 **OpenTelemetry Tracing**:
-`opentelemetry-instrument` wrapper + manual spans for domain operations; sampler `ParentBased(TraceIdRatioBased(0.1))`; resource attributes `service.name=ticket-genius`, `deployment.environment`. Auto-instrument Flask, SQLAlchemy, httpx, Redis; custom spans for TM calls (`tm.create_offer`, `tm.accept_offer`), payment calls, outbox worker; propagate `traceparent` to TM webhooks; export to OTLP endpoint (Jaeger/Tempo).
+`opentelemetry-instrument` wrapper + manual spans for domain operations; sampler `ParentBased(TraceIdRatioBased(0.1))`; resource attributes `service.name=ticket-genius`, `deployment.environment`. Auto-instrument Flask, SQLAlchemy, httpx, Redis; custom spans for TM calls (`tm.create_offer`, `tm.accept_offer`), payment calls; propagate `traceparent` to TM webhooks; export to OTLP endpoint (Jaeger/Tempo). **Outbox worker span deferred — see ADR-0002.**
 
 **Metrics & Observability (Deferred)**:
-`prometheus-client` + `prometheus-flask-exporter` expose `/metrics` endpoint now. **Grafana Cloud** for hosted Prometheus + Grafana + Alertmanager in future (free tier available). Local Docker Compose for dev if needed. SLIs: request_latency_p99 < 500ms, error_rate < 0.1%, order_success_rate > 99.5%, outbox_lag_seconds < 30, seat_hold_conflict_rate < 1%.
+`prometheus-client` + `prometheus-flask-exporter` expose `/metrics` endpoint now. **Grafana Cloud** for hosted Prometheus + Grafana + Alertmanager in future (free tier available). Local Docker Compose for dev if needed. SLIs: request_latency_p99 < 500ms, error_rate < 0.1%, order_success_rate > 99.5%, seat_hold_conflict_rate < 1%. **outbox_lag_seconds deferred — see ADR-0002.**
 
 **Deployment Strategy (Deferred)**:
 Local environment only for now. Future: Kubernetes (EKS/GKE) with Helm charts; ArgoCD for GitOps; environments: dev (namespace), staging (namespace), prod (separate cluster); blue/green via Argo Rollouts; HPA on CPU/memory + custom metric `queue_depth`.

@@ -196,5 +196,110 @@ def health_check():
             sys.exit(1)
 
 
+@cli.command()
+@click.option('--threshold-hours', default=24, help='Hours threshold for staleness')
+def check_stale(threshold_hours):
+    """Check for stale plans that haven't been synced recently."""
+    import os
+    import json
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import sessionmaker
+    from adapters.orm import Plan
+    from datetime import datetime, timedelta, timezone
+    
+    database_url = os.getenv("DATABASE_URL")
+    engine = create_engine(database_url)
+    Session = sessionmaker(bind=engine)
+    session = Session()
+    
+    try:
+        threshold = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
+        stale_plans = session.query(Plan).filter(
+            Plan.last_synced_at < threshold
+        ).all()
+        
+        stale_data = []
+        for plan in stale_plans:
+            stale_data.append({
+                "plan_id": str(plan.plan_id),
+                "tm_plan_id": plan.tm_plan_id,
+                "name": plan.name,
+                "last_synced_at": plan.last_synced_at.isoformat() if plan.last_synced_at else None,
+                "hours_stale": int((datetime.now(timezone.utc) - plan.last_synced_at).total_seconds() / 3600) if plan.last_synced_at else None,
+            })
+        
+        click.echo(json.dumps({
+            "stale_count": len(stale_data),
+            "threshold_hours": threshold_hours,
+            "stale_plans": stale_data,
+        }, indent=2))
+        
+    except Exception as e:
+        click.echo(json.dumps({"error": str(e)}), err=True)
+        sys.exit(1)
+    finally:
+        session.close()
+
+
+@cli.command()
+@click.option('--threshold-hours', default=24, help='Hours threshold for staleness')
+@click.option('--dry-run', is_flag=True, help='Only show what would be synced, do not sync')
+def sync_stale(threshold_hours, dry_run):
+    """Sync only stale plans (older than threshold hours)."""
+    import json
+    
+    app = create_app()
+    with app.app_context():
+        from service_layer import MessageBus
+        from service_layer.commands import SyncPlansCommand
+        from entrypoints.bootstrap import bootstrap
+        
+        message_bus = bootstrap()
+        
+        if dry_run:
+            # Just show what would be synced
+            import os
+            from sqlalchemy import create_engine
+            from sqlalchemy.orm import sessionmaker
+            from adapters.orm import Plan
+            from datetime import datetime, timedelta, timezone
+            
+            database_url = os.getenv("DATABASE_URL")
+            engine = create_engine(database_url)
+            Session = sessionmaker(bind=engine)
+            session = Session()
+            
+            try:
+                threshold = datetime.now(timezone.utc) - timedelta(hours=threshold_hours)
+                stale_plans = session.query(Plan).filter(
+                    Plan.last_synced_at < threshold
+                ).all()
+                
+                stale_data = [{
+                    "plan_id": str(p.plan_id),
+                    "tm_plan_id": p.tm_plan_id,
+                    "name": p.name,
+                    "last_synced_at": p.last_synced_at.isoformat() if p.last_synced_at else None,
+                } for p in stale_plans]
+                
+                click.echo(json.dumps({
+                    "would_sync": len(stale_data),
+                    "threshold_hours": threshold_hours,
+                    "plans": stale_data,
+                }, indent=2))
+            finally:
+                session.close()
+            return
+        
+        # Actual sync
+        cmd = SyncPlansCommand(stale_only=True)
+        try:
+            synced = message_bus.handle_command(cmd)
+            click.echo(json.dumps({"synced": synced, "message": f"Synced {synced} stale plans"}))
+        except Exception as e:
+            click.echo(json.dumps({"error": str(e)}), err=True)
+            sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()

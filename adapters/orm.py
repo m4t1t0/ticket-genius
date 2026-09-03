@@ -48,28 +48,6 @@ mapper_registry = registry()
 
 # --- Tables ---
 
-attendees_table = Table(
-    "attendees",
-    mapper_registry.metadata,
-    Column("id", UUIDType(), primary_key=True),
-    Column("order_id", UUIDType(), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False),
-    Column("name", String(255), nullable=False),
-    Column("email", String(255), nullable=False),
-    Column("phone", String(50), nullable=True),
-    Index("ix_attendees_order_id", "order_id"),
-)
-
-seats_table = Table(
-    "seats",
-    mapper_registry.metadata,
-    Column("id", UUIDType(), primary_key=True),
-    Column("order_id", UUIDType(), ForeignKey("orders.id", ondelete="CASCADE"), nullable=False),
-    Column("section", String(50), nullable=False),
-    Column("row", String(50), nullable=False),
-    Column("number", String(50), nullable=False),
-    Index("ix_seats_order_id", "order_id"),
-)
-
 orders_table = Table(
     "orders",
     mapper_registry.metadata,
@@ -83,6 +61,12 @@ orders_table = Table(
     Column("version", Integer, nullable=False, default=1),
     Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
     Column("updated_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)),
+    # Attendee info columns
+    Column("attendee_name", String(255), nullable=True),
+    Column("attendee_email", String(255), nullable=True),
+    Column("attendee_phone", String(50), nullable=True),
+    # Seats stored as JSON array
+    Column("seats_json", JSON, nullable=True),
     Index("ix_orders_plan_id", "plan_id"),
     Index("ix_orders_status", "status"),
     Index("ix_orders_payment_id", "payment_id"),
@@ -124,6 +108,7 @@ plans_table = Table(
     Column("min_price_cents", Integer, nullable=False),
     Column("max_price_cents", Integer, nullable=False),
     Column("currency", SQLEnum(Currency, name="currency_enum"), nullable=False, default=Currency.EUR),
+    Column("seat_prices_json", JSON, nullable=True),  # section -> price_cents
     Column("last_synced_at", DateTime(timezone=True), nullable=False),
     Column("tm_last_modified", DateTime(timezone=True), nullable=False),
     Column("version", Integer, nullable=False, default=1),
@@ -152,8 +137,13 @@ outbox_table = Table(
 # --- Mappers ---
 
 def _money_composite(amount_cents_col, currency_col):
+    def _make_money(cents, curr):
+        return Money(amount=Decimal(cents) / 100, currency=curr)
+    
+    _make_money.__composite_values__ = lambda self: (int(self.amount * 100), self.currency)
+    
     return composite(
-        lambda cents, curr: Money(amount=Decimal(cents) / 100, currency=curr),
+        _make_money,
         amount_cents_col,
         currency_col,
     )
@@ -193,6 +183,23 @@ def _attendee_info_composite(name_col, email_col, phone_col):
     )
 
 
+def _seats_composite(seats_col):
+    """Composite for list of seats stored as JSON."""
+    def _make_seats(seats_json):
+        if not seats_json:
+            return []
+        return [Seat(**s) for s in seats_json]
+    
+    def _seats_to_json(seats):
+        if not seats:
+            return None
+        return [{"section": s.section, "row": s.row, "number": s.number} for s in seats]
+    
+    return composite(
+        _make_seats,
+        seats_col,
+    )
+
 # Order mapper
 mapper_registry.map_imperatively(
     Order,
@@ -205,18 +212,11 @@ mapper_registry.map_imperatively(
         "status": orders_table.c.status,
         "payment_id": orders_table.c.payment_id,
         "version": orders_table.c.version,
-        "seats": relationship(
-            Seat,
-            backref="order",
-            cascade="all, delete-orphan",
-            collection_class=list,
-        ),
-        "attendee_info": relationship(
-            AttendeeInfo,
-            backref="order",
-            cascade="all, delete-orphan",
-            collection_class=list,
-            uselist=False,
+        "seats": _seats_composite(orders_table.c.seats_json),
+        "attendee_info": _attendee_info_composite(
+            orders_table.c.attendee_name,
+            orders_table.c.attendee_email,
+            orders_table.c.attendee_phone,
         ),
     },
 )
@@ -243,7 +243,7 @@ mapper_registry.map_imperatively(
     plans_table,
     properties={
         "plan_id": plans_table.c.id,
-        "tm_plan_id": plans_table.c.tm_plan_id,
+        "_tm_plan_id": plans_table.c.tm_plan_id,
         "name": plans_table.c.name,
         "url": plans_table.c.url,
         "image_url": plans_table.c.image_url,
@@ -257,33 +257,10 @@ mapper_registry.map_imperatively(
         "venue_state": plans_table.c.venue_state,
         "min_price": _money_composite(plans_table.c.min_price_cents, plans_table.c.currency),
         "max_price": _money_composite(plans_table.c.max_price_cents, plans_table.c.currency),
+        "seat_prices_json": plans_table.c.seat_prices_json,
         "last_synced_at": plans_table.c.last_synced_at,
         "tm_last_modified": plans_table.c.tm_last_modified,
         "version": plans_table.c.version,
-    },
-)
-
-# AttendeeInfo mapper
-mapper_registry.map_imperatively(
-    AttendeeInfo,
-    attendees_table,
-    properties={
-        "id": attendees_table.c.id,
-        "name": attendees_table.c.name,
-        "email": attendees_table.c.email,
-        "phone": attendees_table.c.phone,
-    },
-)
-
-# Seat mapper
-mapper_registry.map_imperatively(
-    Seat,
-    seats_table,
-    properties={
-        "id": seats_table.c.id,
-        "section": seats_table.c.section,
-        "row": seats_table.c.row,
-        "number": seats_table.c.number,
     },
 )
 

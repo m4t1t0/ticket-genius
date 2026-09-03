@@ -10,6 +10,7 @@ from service_layer.queries import (
 )
 from service_layer.handlers import OrderCommandHandler, PlanCommandHandler, QueryHandler
 from service_layer.messagebus import MessageBus
+from service_layer.fulfillment import FulfillOrderService
 
 __all__ = [
     "CreateOrderCommand",
@@ -30,4 +31,5 @@ __all__ = [
     "PlanCommandHandler",
     "QueryHandler",
     "MessageBus",
+    "FulfillOrderService",
 ]

@@ -1,57 +1,28 @@
 """Bootstrap - dependency injection wiring."""
-import os
 from typing import Optional
+import signal
+import threading
+import sys
 
-from redis import Redis
-from apispec import APISpec
-from apispec.ext.marshmallow import MarshmallowPlugin
-from flask_apispec import FlaskApiSpec
-
-from adapters import (
-    SqlAlchemyUnitOfWork,
-    TicketmasterAdapter,
-    PaymentSimulatorAdapter,
+from container import create_container
+from config import get_settings
+from observability import (
+    configure_logging,
+    init_tracing,
+    metrics_endpoint,
 )
-from service_layer import (
-    OrderCommandHandler,
-    PlanCommandHandler,
-    QueryHandler,
-    MessageBus,
-)
+from observability.middleware import init_observability
+from service_layer import MessageBus
 
 
-def get_redis_client() -> Optional[Redis]:
-    """Get Redis client from environment."""
-    redis_url = os.getenv("REDIS_URL")
-    if redis_url:
-        return Redis.from_url(redis_url, decode_responses=True)
-    return None
-
-
-def create_api_spec(app):
-    """Create and configure APISpec for OpenAPI documentation (used for /openapi.json only)."""
-    spec = APISpec(
-        title="Ticket Genius API",
-        version="0.1.0",
-        openapi_version="3.0.3",
-        plugins=[MarshmallowPlugin()],
-    )
-    
-    # Add security schemes
-    spec.components.security_scheme("BearerAuth", {
-        "type": "http",
-        "scheme": "bearer",
-        "bearerFormat": "JWT",
-    })
-    
-    docs = FlaskApiSpec(app)
-    app.config['APISPEC_SPEC'] = spec
-    return docs
+# Global shutdown event for graceful shutdown
+shutdown_event = threading.Event()
 
 
 def load_manual_openapi_spec():
-    """Load manual OpenAPI spec from YAML file for Swagger UI."""
+    """Load manual OpenAPI spec from YAML file for Swagger UI and /openapi.json."""
     import yaml
+    import os
     spec_path = os.path.join(os.path.dirname(__file__), "..", "docs", "openapi.yaml")
     with open(spec_path, 'r') as f:
         return yaml.safe_load(f)
@@ -59,72 +30,63 @@ def load_manual_openapi_spec():
 
 def bootstrap(config: Optional[dict] = None) -> MessageBus:
     """
-    Bootstrap the application with all dependencies wired.
+    Bootstrap the application with all dependencies wired via DI container.
     
     Args:
-        config: Optional configuration dict with:
-            - database_url: PostgreSQL/SQLite connection string
-            - tm_client_id: Ticketmaster API key
-            - tm_client_secret: Ticketmaster API secret
-            - test_mode: Use simulated payment adapter
-    
+        config: Optional configuration dict (for testing overrides)
+        
     Returns:
         Configured MessageBus instance
     """
-    config = config or {}
+    container = create_container()
+    
+    # Override config if provided (mainly for testing)
+    if config:
+        if "database_url" in config:
+            container.config.database.url.from_value(config["database_url"])
+        if "tm_client_id" in config:
+            container.config.ticketmaster.client_id.from_value(config["tm_client_id"])
+        if "tm_client_secret" in config:
+            container.config.ticketmaster.client_secret.from_value(config["tm_client_secret"])
+        if "test_mode" in config:
+            container.config.payment.test_mode.from_value(config["test_mode"])
+        if "sandbox" in config:
+            container.config.ticketmaster.sandbox.from_value(config["sandbox"])
 
-    # Database
-    database_url = config.get("database_url") or os.getenv("DATABASE_URL", "sqlite:///ticket_genius.db")
-    uow = SqlAlchemyUnitOfWork(database_url)
-
-    # Redis
-    redis = get_redis_client()
-
-    # Ticketmaster adapter
-    tm_client_id = config.get("tm_client_id") or os.getenv("TM_API_KEY", "test")
-    tm_client_secret = config.get("tm_client_secret") or os.getenv("TM_API_SECRET", "test")
-    tm_adapter = TicketmasterAdapter(
-        client_id=tm_client_id,
-        client_secret=tm_client_secret,
-        redis_client=redis,
-        sandbox=config.get("sandbox", True),
-    )
-
-    # Payment adapter
-    test_mode = config.get("test_mode", True)
-    if test_mode:
-        payment_adapter = PaymentSimulatorAdapter()
-    else:
-        # Would use StripeAdapter here
-        payment_adapter = PaymentSimulatorAdapter()  # fallback
-
-    # Handlers
-    order_handler = OrderCommandHandler(uow, tm_adapter, payment_adapter)
-    plan_handler = PlanCommandHandler(uow, tm_adapter)
-    query_handler = QueryHandler(uow)
-
-    # Message bus
-    message_bus = MessageBus(order_handler, plan_handler, query_handler)
-
-    return message_bus
+    return container.message_bus()
 
 
 def create_app(config: Optional[dict] = None):
-    """Flask app factory with bootstrapped message bus."""
-    from flask import Flask, render_template_string
+    """Flask app factory with bootstrapped message bus via DI container."""
+    from flask import Flask, render_template_string, jsonify
     from dotenv import load_dotenv
 
     load_dotenv()
+
+    # Initialize structured logging
+    settings = get_settings()
+    configure_logging(level=settings.log_level, format=settings.log_format)
+
+    # Initialize OpenTelemetry tracing
+    if settings.otel_endpoint:
+        init_tracing(
+            service_name=settings.otel_service_name,
+            otlp_endpoint=settings.otel_endpoint,
+        )
 
     message_bus = bootstrap(config)
 
     app = Flask(__name__)
     app.message_bus = message_bus
 
-    # OpenAPI documentation (for /openapi.json only)
-    docs = create_api_spec(app)
+    # Initialize observability middleware (correlation ID, request logging)
+    init_observability(app)
 
-    # Load manual OpenAPI spec for Swagger UI
+    # Prometheus metrics endpoint
+    if settings.metrics_enabled:
+        app.add_url_rule("/metrics", "metrics", metrics_endpoint)
+
+    # Load manual OpenAPI spec for Swagger UI and /openapi.json
     manual_spec = load_manual_openapi_spec()
 
     @app.route("/")
@@ -139,6 +101,62 @@ def create_app(config: Optional[dict] = None):
     @app.route("/health")
     def health():
         return {"status": "ok"}
+
+    @app.route("/health/ready")
+    def health_ready():
+        """Readiness check - verifies DB, Redis, and TM connectivity."""
+        from observability import get_logger
+        logger = get_logger(__name__)
+        
+        checks = {}
+        all_healthy = True
+        
+        # Access handlers via private attributes
+        order_handler = message_bus._order_handler
+        tm_adapter = order_handler._tm
+        
+        # Check database
+        try:
+            from sqlalchemy import text
+            uow = order_handler._uow
+            with uow:
+                uow.session.execute(text("SELECT 1"))
+            checks["database"] = "ok"
+        except Exception as e:
+            checks["database"] = f"failed: {e}"
+            all_healthy = False
+            logger.warning("readiness_check_database_failed", error=str(e))
+        
+        # Check Redis
+        try:
+            if tm_adapter.redis:
+                tm_adapter.redis.ping()
+                checks["redis"] = "ok"
+            else:
+                checks["redis"] = "not_configured"
+        except Exception as e:
+            checks["redis"] = f"failed: {e}"
+            all_healthy = False
+            logger.warning("readiness_check_redis_failed", error=str(e))
+        
+        # Check Ticketmaster OAuth token (cached)
+        try:
+            token = tm_adapter._get_access_token()
+            if token:
+                checks["ticketmaster"] = "ok"
+            else:
+                checks["ticketmaster"] = "no_token"
+                all_healthy = False
+        except Exception as e:
+            checks["ticketmaster"] = f"failed: {e}"
+            all_healthy = False
+            logger.warning("readiness_check_ticketmaster_failed", error=str(e))
+        
+        status_code = 200 if all_healthy else 503
+        return jsonify({
+            "status": "ready" if all_healthy else "not_ready",
+            "checks": checks
+        }), status_code
 
     # Swagger UI endpoint - serve manual OpenAPI spec with Swagger UI
     @app.route("/docs")
@@ -183,14 +201,59 @@ def create_app(config: Optional[dict] = None):
 </html>
         ''', spec_json=manual_spec)
 
+    # OpenAPI spec endpoint (manual YAML spec)
+    @app.route("/openapi.json")
+    def openapi_json():
+        return jsonify(manual_spec)
+
     # Register API routes
     from entrypoints.api import register_routes
     bp = register_routes(message_bus)
     app.register_blueprint(bp)
 
-    # Register OpenAPI spec endpoint (from flask-apispec)
-    @app.route("/openapi.json")
-    def openapi_json():
-        return docs.spec.to_dict()
+    # Graceful shutdown handling
+    def shutdown_handler(signum, frame):
+        from observability import get_logger
+        logger = get_logger(__name__)
+        logger.info("shutdown_signal_received", signal=signum)
+        shutdown_event.set()
+        
+        # Access handlers via private attributes
+        order_handler = message_bus._order_handler
+        tm_adapter = order_handler._tm
+        
+        # Flush outbox events
+        try:
+            uow = order_handler._uow
+            with uow:
+                uow._collect_domain_events()
+                uow._write_outbox_events()
+                uow.session.commit()
+            logger.info("outbox_flushed_on_shutdown")
+        except Exception as e:
+            logger.error("outbox_flush_failed_on_shutdown", error=str(e))
+        
+        # Dispose engine
+        try:
+            uow = order_handler._uow
+            uow._engine.dispose()
+            logger.info("database_engine_disposed")
+        except Exception as e:
+            logger.error("engine_dispose_failed", error=str(e))
+        
+        # Close Redis
+        try:
+            if tm_adapter.redis:
+                tm_adapter.redis.close()
+                logger.info("redis_connection_closed")
+        except Exception as e:
+            logger.error("redis_close_failed", error=str(e))
+        
+        logger.info("shutdown_complete")
+        sys.exit(0)
+
+    # Register signal handlers
+    signal.signal(signal.SIGTERM, shutdown_handler)
+    signal.signal(signal.SIGINT, shutdown_handler)
 
     return app

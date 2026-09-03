@@ -7,6 +7,15 @@ from domain.value_objects import TicketQuantity
 from dataclasses import dataclass
 
 
+from abc import ABC, abstractmethod
+from typing import List, Optional
+from uuid import UUID
+from dataclasses import dataclass, field
+
+from domain.models import Order, Payment, Plan
+from domain.value_objects import TicketQuantity
+
+
 @dataclass
 class PlanSearchQuery:
     query: Optional[str] = None
@@ -22,9 +31,9 @@ class PlanSearchQuery:
 
 
 @dataclass
-class PlanSummary:
+class PlanBase:
+    """Base fields common to PlanSummary and PlanDetail."""
     plan_id: UUID
-    tm_plan_id: str
     name: str
     url: str
     image_url: Optional[str]
@@ -40,24 +49,19 @@ class PlanSummary:
 
 
 @dataclass
-class PlanDetail:
-    plan_id: UUID
-    tm_plan_id: str
-    name: str
-    url: str
-    image_url: Optional[str]
+class PlanSummary(PlanBase):
+    pass
+
+
+@dataclass
+class PlanDetail(PlanBase):
     date_range: object
-    venue_name: str
-    venue_city: str
-    venue_state: str
-    min_price: float
-    max_price: float
-    currency: str
-    seat_map: List[dict]
+    seat_map: List[dict] = field(default_factory=list)
 
 
 @dataclass
-class OrderSummary:
+class OrderBase:
+    """Base fields common to OrderSummary and OrderStatusDetail."""
     order_id: UUID
     plan_id: UUID
     plan_name: str
@@ -69,18 +73,15 @@ class OrderSummary:
 
 
 @dataclass
-class OrderStatusDetail:
-    order_id: UUID
-    plan_id: UUID
-    plan_name: str
-    status: str
-    quantity: int
-    total_amount: float
-    currency: str
-    seats: List[dict]
-    payment_id: Optional[UUID]
-    created_at: str
-    updated_at: str
+class OrderSummary(OrderBase):
+    pass
+
+
+@dataclass
+class OrderStatusDetail(OrderBase):
+    seats: List[dict] = field(default_factory=list)
+    payment_id: Optional[UUID] = None
+    updated_at: str = ""
 
 
 # Write Repository Ports
