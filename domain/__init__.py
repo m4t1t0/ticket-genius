@@ -28,6 +28,7 @@ from domain.repositories import (
     PlanDetail,
     OrderSummary,
     OrderStatusDetail,
+    PlanSearchPort,
 )
 from domain.exceptions import (
     DomainException,
@@ -98,4 +99,5 @@ __all__ = [
     "ProviderAuthenticationError",
     "ValidationError",
     "OptimisticLockError",
+    "PlanSearchPort",
 ]

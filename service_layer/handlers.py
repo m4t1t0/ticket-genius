@@ -4,9 +4,6 @@ from decimal import Decimal
 from typing import Optional, List
 from uuid import UUID, uuid4
 
-from adapters.ticketmaster import TicketmasterAdapter, ProviderError as TMProviderError
-from adapters.payment import PaymentSimulatorAdapter, PaymentNotFoundError as PaymentAdapterNotFoundError
-
 from domain.models import Order, Payment, Plan
 from domain.value_objects import Money, Currency, TicketQuantity, Seat, AttendeeInfo
 from domain.events import (
@@ -24,6 +21,7 @@ from domain.exceptions import (
     ValidationError,
     IdempotencyKeyUsedError,
 )
+from domain.repositories import PlanSearchPort
 
 from service_layer.commands import (
     CreateOrderCommand, ConfirmPaymentCommand, CancelOrderCommand,
@@ -237,7 +235,7 @@ class PlanCommandHandler:
 
             for event in events:
                 plan = Plan.from_ticketmaster(event)
-                existing = self._uow.plans.get_by_tm_id(plan.tm_plan_id)
+                existing = self._uow.plans.get_by_tm_id(plan._tm_plan_id)  # Adapter-internal: access TM plan ID
                 
                 # If stale_only, skip plans that were synced recently
                 if cmd.stale_only and existing:
@@ -261,14 +259,14 @@ class PlanCommandHandler:
 
 
 class QueryHandler:
-    def __init__(self, uow, tm_adapter: TicketmasterAdapter):
+    def __init__(self, uow, search_port: PlanSearchPort):
         self._uow = uow
-        self._tm = tm_adapter
+        self._search = search_port
 
-    def handle_search_plans(self, query: SearchPlansQuery) -> List:
+    def handle_search_plans(self, query: SearchPlansQuery) -> PlanSearchResult:
         with self._uow:
-            # Use TM adapter for search (full-text search, pagination handled by TM)
-            events = self._tm.search_plans(
+            # Use search port for search (full-text search, pagination handled by provider)
+            events = self._search.search_plans(
                 query=query.query,
                 lat=query.lat,
                 lon=query.lon,
@@ -277,19 +275,20 @@ class QueryHandler:
                 date_to=query.date_to,
                 min_price=query.min_price,
                 max_price=query.max_price,
-                page=0,  # TM handles pagination internally
+                page=0,  # Provider handles pagination internally
                 size=query.limit,
             )
             
-            # Convert TM events to PlanSummary
+            # Convert provider events to PlanSummary using deterministic UUIDs
+            from uuid import uuid5, NAMESPACE_URL
             from service_layer.queries import PlanSearchResult
-            return [PlanSearchResult(
-                plan_id=UUID(e["id"]),  # This would need to match local plans
+            plans = [PlanSummary(
+                plan_id=uuid5(NAMESPACE_URL, f"ticketmaster.com/events/{e['id']}"),
                 name=e["name"],
                 url=e["url"],
                 image_url=e["images"][0]["url"] if e.get("images") else None,
-                start_date=e["dates"]["start"]["dateTime"],
-                start_time=e["dates"]["start"]["dateTime"][11:16],  # Extract time
+                start_date=e["dates"]["start"]["dateTime"][:10],
+                start_time=e["dates"]["start"]["dateTime"][11:16],
                 timezone=e["dates"]["timezone"],
                 venue_name=e["_embedded"]["venues"][0]["name"],
                 venue_city=e["_embedded"]["venues"][0]["city"]["name"],
@@ -298,6 +297,12 @@ class QueryHandler:
                 max_price=float(e.get("priceRanges", [{}])[0].get("max", 0)),
                 currency=e.get("priceRanges", [{}])[0].get("currency", "EUR"),
             ) for e in events]
+            
+            return PlanSearchResult(
+                plans=plans,
+                cursor=None,
+                has_more=len(events) == query.limit,
+            )
 
     def handle_get_plan(self, query: GetPlanQuery):
         with self._uow:

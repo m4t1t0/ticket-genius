@@ -73,7 +73,7 @@ class Container(containers.DeclarativeContainer):
     query_handler = providers.Factory(
         QueryHandler,
         uow=unit_of_work,
-        tm_adapter=ticketmaster_adapter,
+        search_port=ticketmaster_adapter,
     )
 
     # Message bus

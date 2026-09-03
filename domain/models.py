@@ -238,10 +238,9 @@ class Plan(AggregateRoot):
         if not hasattr(self, '_domain_events'):
             self._domain_events = []
 
-    @property
-    def tm_plan_id(self) -> str:
-        """Internal accessor for repository/ORM mapping."""
-        return self._tm_plan_id
+    # Note: _tm_plan_id is intentionally private - only adapters/ORM should access it.
+# Domain code should not depend on Ticketmaster-specific identifiers.
+# Adapters needing TM plan ID should access _tm_plan_id directly (Python convention).
 
     @property
     def seat_prices(self) -> dict:

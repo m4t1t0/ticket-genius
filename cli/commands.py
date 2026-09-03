@@ -222,7 +222,7 @@ def check_stale(threshold_hours):
         for plan in stale_plans:
             stale_data.append({
                 "plan_id": str(plan.plan_id),
-                "tm_plan_id": plan.tm_plan_id,
+                "tm_plan_id": plan._tm_plan_id,  # Adapter-internal access
                 "name": plan.name,
                 "last_synced_at": plan.last_synced_at.isoformat() if plan.last_synced_at else None,
                 "hours_stale": int((datetime.now(timezone.utc) - plan.last_synced_at).total_seconds() / 3600) if plan.last_synced_at else None,
@@ -277,7 +277,7 @@ def sync_stale(threshold_hours, dry_run):
                 
                 stale_data = [{
                     "plan_id": str(p.plan_id),
-                    "tm_plan_id": p.tm_plan_id,
+                    "tm_plan_id": p._tm_plan_id,  # Adapter-internal access
                     "name": p.name,
                     "last_synced_at": p.last_synced_at.isoformat() if p.last_synced_at else None,
                 } for p in stale_plans]

@@ -201,7 +201,7 @@ class TestPlan:
 
     def test_from_ticketmaster(self, tm_data):
         plan = Plan.from_ticketmaster(tm_data)
-        assert plan.tm_plan_id == "tm_123"
+        assert plan._tm_plan_id == "tm_123"
         assert plan.name == "Test Concert"
         assert plan.venue_city == "Madrid"
         assert plan.min_price.amount == 50

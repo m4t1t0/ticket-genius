@@ -125,6 +125,13 @@ class SqlAlchemyUnitOfWork:
         self._write_outbox_events()
         self.session.commit()
 
+    def flush_outbox(self) -> None:
+        """Public method to flush outbox events without committing transaction.
+        Used during graceful shutdown to ensure pending events are persisted."""
+        self._collect_domain_events()
+        self._write_outbox_events()
+        self.session.commit()
+
     def rollback(self) -> None:
         self.session.rollback()
 

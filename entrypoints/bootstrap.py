@@ -111,46 +111,24 @@ def create_app(config: Optional[dict] = None):
         checks = {}
         all_healthy = True
         
-        # Access handlers via private attributes
-        order_handler = message_bus._order_handler
-        tm_adapter = order_handler._tm
-        
-        # Check database
-        try:
-            from sqlalchemy import text
-            uow = order_handler._uow
-            with uow:
-                uow.session.execute(text("SELECT 1"))
-            checks["database"] = "ok"
-        except Exception as e:
-            checks["database"] = f"failed: {e}"
+        # Use public methods on MessageBus
+        db_ok = message_bus.check_database()
+        checks["database"] = "ok" if db_ok else "failed"
+        if not db_ok:
             all_healthy = False
-            logger.warning("readiness_check_database_failed", error=str(e))
+            logger.warning("readiness_check_database_failed")
         
-        # Check Redis
-        try:
-            if tm_adapter.redis:
-                tm_adapter.redis.ping()
-                checks["redis"] = "ok"
-            else:
-                checks["redis"] = "not_configured"
-        except Exception as e:
-            checks["redis"] = f"failed: {e}"
+        redis_ok = message_bus.check_redis()
+        checks["redis"] = "ok" if redis_ok else ("not_configured" if redis_ok is False else "failed")
+        if not redis_ok:
             all_healthy = False
-            logger.warning("readiness_check_redis_failed", error=str(e))
+            logger.warning("readiness_check_redis_failed")
         
-        # Check Ticketmaster OAuth token (cached)
-        try:
-            token = tm_adapter._get_access_token()
-            if token:
-                checks["ticketmaster"] = "ok"
-            else:
-                checks["ticketmaster"] = "no_token"
-                all_healthy = False
-        except Exception as e:
-            checks["ticketmaster"] = f"failed: {e}"
+        tm_ok = message_bus.check_ticketmaster()
+        checks["ticketmaster"] = "ok" if tm_ok else "no_token"
+        if not tm_ok:
             all_healthy = False
-            logger.warning("readiness_check_ticketmaster_failed", error=str(e))
+            logger.warning("readiness_check_ticketmaster_failed")
         
         status_code = 200 if all_healthy else 503
         return jsonify({
@@ -218,38 +196,13 @@ def create_app(config: Optional[dict] = None):
         logger.info("shutdown_signal_received", signal=signum)
         shutdown_event.set()
         
-        # Access handlers via private attributes
-        order_handler = message_bus._order_handler
-        tm_adapter = order_handler._tm
-        
-        # Flush outbox events
+        # Use public shutdown method on MessageBus
         try:
-            uow = order_handler._uow
-            with uow:
-                uow._collect_domain_events()
-                uow._write_outbox_events()
-                uow.session.commit()
-            logger.info("outbox_flushed_on_shutdown")
+            message_bus.shutdown()
+            logger.info("shutdown_complete")
         except Exception as e:
-            logger.error("outbox_flush_failed_on_shutdown", error=str(e))
+            logger.error("shutdown_failed", error=str(e))
         
-        # Dispose engine
-        try:
-            uow = order_handler._uow
-            uow._engine.dispose()
-            logger.info("database_engine_disposed")
-        except Exception as e:
-            logger.error("engine_dispose_failed", error=str(e))
-        
-        # Close Redis
-        try:
-            if tm_adapter.redis:
-                tm_adapter.redis.close()
-                logger.info("redis_connection_closed")
-        except Exception as e:
-            logger.error("redis_close_failed", error=str(e))
-        
-        logger.info("shutdown_complete")
         sys.exit(0)
 
     # Register signal handlers

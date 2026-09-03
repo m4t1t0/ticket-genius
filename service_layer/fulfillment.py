@@ -47,7 +47,7 @@ class FulfillOrderService:
         # Create TM offer with idempotency key
         idempotency_key = f"order_{order.order_id}"
         tm_order = self._tm.create_order(
-            plan_id=plan.tm_plan_id,
+            plan_id=plan._tm_plan_id,  # Adapter-internal: access TM plan ID
             quantity=order.quantity.value,
             seat_ids=[f"{s.section}-{s.row}-{s.number}" for s in order.seats],
             idempotency_key=idempotency_key,
@@ -66,7 +66,7 @@ class FulfillOrderService:
         tickets = acceptance.get("fulfillment", {}).get("tickets", [])
 
         # Release seat holds after successful fulfillment
-        _release_seat_holds(self._tm.redis, order.plan_id, seat_ids, order.order_id)
+        release_seat_holds(self._tm.redis, order.plan_id, seat_ids, order.order_id)
 
         # Add domain event for fulfillment
         order.add_domain_event(

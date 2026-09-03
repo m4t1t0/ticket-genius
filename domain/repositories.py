@@ -146,3 +146,31 @@ class PlanReadRepository(ABC):
     @abstractmethod
     def get_plan(self, plan_id: UUID) -> Optional[PlanDetail]:
         pass
+
+
+# Search Port (for external provider search like Ticketmaster)
+class PlanSearchPort(ABC):
+    @abstractmethod
+    def search_plans(
+        self,
+        query: Optional[str] = None,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
+        radius_km: Optional[int] = None,
+        date_from: Optional[str] = None,
+        date_to: Optional[str] = None,
+        min_price: Optional[float] = None,
+        max_price: Optional[float] = None,
+        page: int = 0,
+        size: int = 20,
+    ) -> List[dict]:
+        """Search for plans/events from external provider.
+        
+        Returns raw provider data (not domain models).
+        """
+        pass
+
+    @abstractmethod
+    def get_plan(self, plan_id: str) -> Optional[dict]:
+        """Get single plan by ID from provider."""
+        pass

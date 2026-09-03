@@ -33,6 +33,74 @@ class MessageBus:
         """Handle a query (read operation) using singledispatch."""
         return self._handle_query(query)
 
+    # Public health check methods
+    def check_database(self) -> bool:
+        """Check database connectivity."""
+        try:
+            from sqlalchemy import text
+            uow = self._order_handler._uow
+            with uow:
+                uow.session.execute(text("SELECT 1"))
+            return True
+        except Exception:
+            return False
+
+    def check_redis(self) -> bool:
+        """Check Redis connectivity."""
+        try:
+            tm_adapter = self._order_handler._tm
+            if tm_adapter.redis:
+                tm_adapter.redis.ping()
+                return True
+            return False
+        except Exception:
+            return False
+
+    def check_ticketmaster(self) -> bool:
+        """Check Ticketmaster OAuth token."""
+        try:
+            tm_adapter = self._order_handler._tm
+            token = tm_adapter._get_access_token()
+            return token is not None
+        except Exception:
+            return False
+
+    def flush_outbox(self) -> None:
+        """Flush outbox events."""
+        uow = self._order_handler._uow
+        uow.flush_outbox()
+
+    def shutdown(self) -> None:
+        """Graceful shutdown: flush outbox, dispose engine, close Redis."""
+        # Flush outbox
+        try:
+            self.flush_outbox()
+        except Exception:
+            pass
+
+        # Dispose engine
+        try:
+            uow = self._order_handler._uow
+            uow._engine.dispose()
+        except Exception:
+            pass
+
+        # Close Redis
+        try:
+            tm_adapter = self._order_handler._tm
+            if tm_adapter.redis:
+                tm_adapter.redis.close()
+        except Exception:
+            pass
+
+    def handle_command(self, command) -> Any:
+        """Handle a command (write operation) using singledispatch."""
+        return self._handle_command(command)
+
+    def handle_query(self, query) -> Any:
+        """Handle a query (read operation) using singledispatch."""
+        return self._handle_query(query)
+
     # Command handlers using singledispatch
     @singledispatch
     def _handle_command(self, command) -> Any:

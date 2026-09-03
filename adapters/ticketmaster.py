@@ -11,6 +11,7 @@ from redis import Redis
 
 from domain.value_objects import Money, Currency, DateRange
 from domain.exceptions import PlanNotFoundError, ProviderError, ProviderRateLimitedError, ProviderAuthenticationError
+from domain.repositories import PlanSearchPort
 
 
 class TokenBucket:
@@ -39,12 +40,14 @@ class TokenBucket:
         return wait_time
 
 
-class TicketmasterAdapter:
+class TicketmasterAdapter(PlanSearchPort):
     """Adapter for Ticketmaster Discovery API v2.
 
     Note: The Discovery API v2 uses the same base URL for both sandbox and production.
     The environment is determined by the API credentials (client_id/client_secret).
     Sandbox credentials are obtained from the Ticketmaster Developer Portal.
+    
+    Implements PlanSearchPort for external provider search.
     """
 
     BASE_URL = "https://app.ticketmaster.com/discovery/v2"
