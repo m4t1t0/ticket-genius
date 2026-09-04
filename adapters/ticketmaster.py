@@ -87,6 +87,11 @@ class TicketmasterAdapter(PlanSearchPort):
     HTTP_NOT_FOUND = 404
     HTTP_UNAUTHORIZED = 401
 
+    # Error messages for TRY003
+    _MSG_PLAN_NOT_FOUND = "Plan not found"
+    _MSG_AUTH_ERROR = "Ticketmaster"
+    _MSG_SERVER_ERROR = "Server error"
+
     def __init__(
         self,
         client_id: str,
@@ -140,16 +145,16 @@ class TicketmasterAdapter(PlanSearchPort):
         HTTP_INTERNAL_SERVER_ERROR = 500
 
         if status == HTTP_NOT_FOUND:
-            raise PlanNotFoundError("Plan not found") from e
+            raise PlanNotFoundError(self._MSG_PLAN_NOT_FOUND) from e
         if status == HTTP_UNAUTHORIZED:
-            raise ProviderAuthenticationError("Ticketmaster") from e
+            raise ProviderAuthenticationError(self._MSG_AUTH_ERROR) from e
         if status == HTTP_TOO_MANY_REQUESTS:
             retry_after = int(e.response.headers.get("Retry-After", "60"))
-            raise ProviderRateLimitedError("Ticketmaster", retry_after=retry_after) from e
+            raise ProviderRateLimitedError(self._MSG_AUTH_ERROR, retry_after=retry_after) from e
         if status >= HTTP_INTERNAL_SERVER_ERROR:
             # Don't raise here, let the caller handle retry logic
-            raise RetryableError("Server error") from e
-        raise ProviderError("Ticketmaster", str(e)) from e
+            raise RetryableError(self._MSG_SERVER_ERROR) from e
+        raise ProviderError(self._MSG_AUTH_ERROR, str(e)) from e
 
     def _make_request(
         self, method: str, path: str, params: dict | None = None, use_cache: bool = True
@@ -196,12 +201,6 @@ class TicketmasterAdapter(PlanSearchPort):
                 response.raise_for_status()
                 data = response.json()
 
-                # Cache successful GET responses
-                if use_cache and self.redis and cache_key and method == "GET":
-                    self.redis.setex(cache_key, 300, json.dumps(data))
-
-                return data
-
             except httpx.HTTPStatusError as e:
                 try:
                     self._handle_http_error(e, attempt, max_retries)
@@ -210,6 +209,12 @@ class TicketmasterAdapter(PlanSearchPort):
                         time.sleep(2**attempt)
                         continue
                     raise
+            else:
+                # Cache successful GET responses
+                if use_cache and self.redis and cache_key and method == "GET":
+                    self.redis.setex(cache_key, 300, json.dumps(data))
+
+                return data
 
         raise ProviderError("Ticketmaster", "Max retries exceeded")
 

@@ -7,10 +7,14 @@ from datetime import UTC, datetime, timedelta
 
 import click
 from redis import Redis
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
+from adapters.orm import OutboxEvent, Plan
+from domain.value_objects import Currency, Money
 from entrypoints import create_app
 from entrypoints.bootstrap import bootstrap
-from service_layer.commands import SyncPlansCommand
+from service_layer.commands import RefundOrderCommand, SyncPlansCommand
 
 
 @click.group()
@@ -86,10 +90,6 @@ def toggle_flag(flag_name, value, pct):
 @click.argument("reason", type=click.Choice(["CUSTOMER_REQUEST", "EVENT_CANCELLED", "SEAT_ISSUE"]))
 def create_refund(order_id, amount, reason):
     """Create a refund for an order."""
-    from domain.value_objects import Currency, Money
-    from entrypoints.bootstrap import bootstrap
-    from service_layer.commands import RefundOrderCommand
-
     app = create_app()
     with app.app_context():
         message_bus = bootstrap()
@@ -114,13 +114,6 @@ def replay_outbox(from_id):
     """Replay outbox events from a given ID."""
     app = create_app()
     with app.app_context():
-        import json
-        import os
-        from sqlalchemy import create_engine
-        from sqlalchemy.orm import sessionmaker
-
-        from adapters.orm import OutboxEvent
-
         database_url = os.getenv("DATABASE_URL")
         engine = create_engine(database_url)
         Session = sessionmaker(bind=engine)
@@ -154,12 +147,6 @@ def health_check():
     """Run health checks."""
     app = create_app()
     with app.app_context():
-        import json
-        import os
-
-        from redis import Redis
-        from sqlalchemy import create_engine, text
-
         checks = {"status": "ok", "checks": {}}
         overall_ok = True
 
@@ -198,14 +185,6 @@ def health_check():
 @click.option("--threshold-hours", default=24, help="Hours threshold for staleness")
 def check_stale(threshold_hours):
     """Check for stale plans that haven't been synced recently."""
-    import json
-    import os
-
-    from sqlalchemy import create_engine
-    from sqlalchemy.orm import sessionmaker
-
-    from adapters.orm import Plan
-
     database_url = os.getenv("DATABASE_URL")
     engine = create_engine(database_url)
     Session = sessionmaker(bind=engine)
@@ -256,25 +235,12 @@ def check_stale(threshold_hours):
 @click.option("--dry-run", is_flag=True, help="Only show what would be synced, do not sync")
 def sync_stale(threshold_hours, dry_run):
     """Sync only stale plans (older than threshold hours)."""
-    import json
-
     app = create_app()
     with app.app_context():
-        from entrypoints.bootstrap import bootstrap
-        from service_layer.commands import SyncPlansCommand
-
         message_bus = bootstrap()
 
         if dry_run:
             # Just show what would be synced
-            import os
-            from datetime import datetime, timedelta
-
-            from sqlalchemy import create_engine
-            from sqlalchemy.orm import sessionmaker
-
-            from adapters.orm import Plan
-
             database_url = os.getenv("DATABASE_URL")
             engine = create_engine(database_url)
             Session = sessionmaker(bind=engine)
