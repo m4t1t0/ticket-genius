@@ -1,5 +1,4 @@
 """Integration tests for the Items HTTP API."""
-import pytest
 
 
 def _create_item(client, name="hammer", description="a tool"):
@@ -33,9 +32,7 @@ class TestCreate:
         assert response.status_code == 400
 
     def test_too_long_description_returns_400(self, client):
-        response = client.post(
-            "/items", json={"name": "ok", "description": "x" * 501}
-        )
+        response = client.post("/items", json={"name": "ok", "description": "x" * 501})
 
         assert response.status_code == 400
 
@@ -75,9 +72,7 @@ class TestUpdate:
     def test_update_returns_updated_payload(self, client):
         created = _create_item(client)
 
-        response = client.put(
-            f"/items/{created['id']}", json={"name": "mallet"}
-        )
+        response = client.put(f"/items/{created['id']}", json={"name": "mallet"})
 
         assert response.status_code == 200
         body = response.get_json()
@@ -94,9 +89,7 @@ class TestUpdate:
     def test_invalid_name_returns_400_not_404(self, client):
         created = _create_item(client)
 
-        response = client.put(
-            f"/items/{created['id']}", json={"name": "x" * 101}
-        )
+        response = client.put(f"/items/{created['id']}", json={"name": "x" * 101})
 
         assert response.status_code == 400
 

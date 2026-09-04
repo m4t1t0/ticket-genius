@@ -1,8 +1,8 @@
 import os
 import signal
 import subprocess
-import time
 import sys
+import time
 
 import requests
 from invoke import task
@@ -13,11 +13,7 @@ WATCH_EXCLUDED = (".venv", "__pycache__", ".git")
 
 def _looks_like_server(pid):
     """Check the PID still points at a Python/Flask process (guards against PID reuse)."""
-    result = subprocess.run(
-        ["ps", "-p", str(pid), "-o", "comm="],
-        capture_output=True,
-        text=True,
-    )
+    result = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True)
     comm = result.stdout.strip().lower()
     return bool(comm) and ("python" in comm or "flask" in comm)
 
@@ -112,7 +108,9 @@ def test(c, verbose=False, coverage=False, unit=False, integration=False):
     if verbose:
         cmd.append("-v")
     if coverage:
-        cmd.extend(["--cov=domain", "--cov=adapters", "--cov=service_layer", "--cov-report=term-missing"])
+        cmd.extend(
+            ["--cov=domain", "--cov=adapters", "--cov=service_layer", "--cov-report=term-missing"]
+        )
     if unit:
         cmd.extend(["tests/unit"])
     if integration:
@@ -123,7 +121,7 @@ def test(c, verbose=False, coverage=False, unit=False, integration=False):
 @task
 def watch(c, port=5000):
     """Start server with auto-reload using watchfiles."""
-    from watchfiles import watch, Change
+    from watchfiles import watch
 
     print(f"Starting file watcher on port {port}...")
     print("Watching for .py file changes...")
@@ -150,6 +148,7 @@ def watch(c, port=5000):
 def cli(c, *args):
     """Run admin CLI commands. Usage: invoke cli -- sync-plans --help"""
     from cli.commands import cli as click_cli
+
     sys.argv = ["cli"] + list(args)
     click_cli()
 
@@ -157,7 +156,7 @@ def cli(c, *args):
 @task
 def sync_plans(c, since=None, stale_only=False, full=False):
     """Sync plans from Ticketmaster."""
-    from cli.commands import sync_plans as click_sync
+
     sys.argv = ["cli", "sync-plans"]
     if since:
         sys.argv.extend(["--since", since])
@@ -166,22 +165,25 @@ def sync_plans(c, since=None, stale_only=False, full=False):
     if full:
         sys.argv.append("--full")
     from cli.commands import cli as click_cli
+
     click_cli()
 
 
 @task
 def purge_cache(c, pattern="*"):
     """Purge Redis cache by pattern."""
-    from cli.commands import purge_cache as click_purge
+
     sys.argv = ["cli", "purge-cache", "--pattern", pattern]
     from cli.commands import cli as click_cli
+
     click_cli()
 
 
 @task
 def toggle_flag(c, flag_name, value, pct=100):
     """Toggle feature flag."""
-    from cli.commands import toggle_flag as click_toggle
+
     sys.argv = ["cli", "toggle-flag", flag_name, value, "--pct", str(pct)]
     from cli.commands import cli as click_cli
+
     click_cli()

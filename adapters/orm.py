@@ -1,27 +1,40 @@
 """SQLAlchemy Imperative Mapping for domain models."""
-from datetime import datetime, timezone
+
+from datetime import UTC, datetime
 from decimal import Decimal
 from uuid import UUID
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 from sqlalchemy import (
-    Table, Column, String, Integer, DateTime, ForeignKey, Index,
-    UniqueConstraint, Text, JSON, Enum as SQLEnum, Numeric, TypeDecorator, CHAR
+    CHAR,
+    JSON,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Table,
+    TypeDecorator,
+    UniqueConstraint,
 )
-from sqlalchemy.orm import registry, relationship, composite
-from sqlalchemy.schema import FetchedValue
+from sqlalchemy import Enum as SQLEnum
+from sqlalchemy.dialects import postgresql
+from sqlalchemy.orm import composite, registry
+
+from domain.models import Order, Payment, Plan
+from domain.value_objects import AttendeeInfo, Currency, DateRange, Money, Seat, TicketQuantity
 
 
 class UUIDType(TypeDecorator):
     """Platform-independent UUID type.
     Uses PostgreSQL's UUID type when available, otherwise falls back to CHAR(36).
     """
+
     impl = CHAR
     cache_ok = True
 
     def load_dialect_impl(self, dialect):
-        if dialect.name == 'postgresql':
+        if dialect.name == "postgresql":
             return dialect.type_descriptor(postgresql.UUID(as_uuid=True))
         else:
             return dialect.type_descriptor(CHAR(36))
@@ -40,9 +53,6 @@ class UUIDType(TypeDecorator):
             return value
         return UUID(value)
 
-from domain.models import Order, Payment, Plan
-from domain.value_objects import Money, Seat, DateRange, TicketQuantity, AttendeeInfo, Currency
-from domain.events import OrderCreated, PaymentInitiated, PaymentConfirmed, PaymentFailed, OrderConfirmed, OrderCancelled
 
 mapper_registry = registry()
 
@@ -55,12 +65,25 @@ orders_table = Table(
     Column("plan_id", UUIDType(), ForeignKey("plans.id"), nullable=False),
     Column("quantity_value", Integer, nullable=False),
     Column("amount_cents", Integer, nullable=False),
-    Column("currency", SQLEnum(Currency, name="currency_enum", values_callable=lambda obj: [e.value for e in obj]), nullable=False, default=Currency.EUR),
+    Column(
+        "currency",
+        SQLEnum(Currency, name="currency_enum", values_callable=lambda obj: [e.value for e in obj]),
+        nullable=False,
+        default=Currency.EUR,
+    ),
     Column("status", String(30), nullable=False, default="PENDING"),
     Column("payment_id", UUIDType(), ForeignKey("payments.id"), nullable=True),
     Column("version", Integer, nullable=False, default=1),
-    Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
-    Column("updated_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    ),
     # Attendee info columns
     Column("attendee_name", String(255), nullable=True),
     Column("attendee_email", String(255), nullable=True),
@@ -78,14 +101,24 @@ payments_table = Table(
     Column("id", UUIDType(), primary_key=True),
     Column("order_id", UUIDType(), ForeignKey("orders.id"), nullable=False),
     Column("amount_cents", Integer, nullable=False),
-    Column("currency", SQLEnum(Currency, name="currency_enum"), nullable=False, default=Currency.EUR),
+    Column(
+        "currency", SQLEnum(Currency, name="currency_enum"), nullable=False, default=Currency.EUR
+    ),
     Column("provider", String(50), nullable=False),
     Column("status", String(30), nullable=False, default="CREATED"),
     Column("provider_ref", String(255), nullable=True),
     Column("intent_id", String(255), nullable=True),
     Column("version", Integer, nullable=False, default=1),
-    Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
-    Column("updated_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    ),
     Index("ix_payments_order_id", "order_id"),
     Index("ix_payments_status", "status"),
     UniqueConstraint("order_id", name="uq_payment_order"),
@@ -107,13 +140,23 @@ plans_table = Table(
     Column("venue_state", String(100), nullable=False),
     Column("min_price_cents", Integer, nullable=False),
     Column("max_price_cents", Integer, nullable=False),
-    Column("currency", SQLEnum(Currency, name="currency_enum"), nullable=False, default=Currency.EUR),
+    Column(
+        "currency", SQLEnum(Currency, name="currency_enum"), nullable=False, default=Currency.EUR
+    ),
     Column("seat_prices_json", JSON, nullable=True),  # section -> price_cents
     Column("last_synced_at", DateTime(timezone=True), nullable=False),
     Column("tm_last_modified", DateTime(timezone=True), nullable=False),
     Column("version", Integer, nullable=False, default=1),
-    Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
-    Column("updated_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    ),
+    Column(
+        "updated_at",
+        DateTime(timezone=True),
+        nullable=False,
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    ),
     Index("ix_plans_tm_plan_id", "tm_plan_id", unique=True),
     Index("ix_plans_date_range", "start_date", "end_date"),
     Index("ix_plans_venue_city", "venue_city"),
@@ -127,78 +170,75 @@ outbox_table = Table(
     Column("aggregate_type", String(50), nullable=False),
     Column("event_type", String(100), nullable=False),
     Column("payload", JSON, nullable=False),
-    Column("created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)),
+    Column(
+        "created_at", DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
+    ),
     Column("processed_at", DateTime(timezone=True), nullable=True),
     Column("retry_count", Integer, nullable=False, default=0),
-    Index("ix_outbox_unprocessed", "processed_at", postgresql_where=(Column("processed_at").is_(None))),
+    Index(
+        "ix_outbox_unprocessed", "processed_at", postgresql_where=(Column("processed_at").is_(None))
+    ),
     Index("ix_outbox_aggregate", "aggregate_id", "aggregate_type"),
 )
 
 # --- Mappers ---
 
+
 def _money_composite(amount_cents_col, currency_col):
     def _make_money(cents, curr):
         return Money(amount=Decimal(cents) / 100, currency=curr)
-    
+
     _make_money.__composite_values__ = lambda self: (int(self.amount * 100), self.currency)
-    
-    return composite(
-        _make_money,
-        amount_cents_col,
-        currency_col,
-    )
+
+    return composite(_make_money, amount_cents_col, currency_col)
 
 
 def _seat_composite(section_col, row_col, number_col):
-    return composite(
-        Seat,
-        section_col,
-        row_col,
-        number_col,
-    )
+    return composite(Seat, section_col, row_col, number_col)
 
 
 def _date_range_composite(start_col, end_col, timezone_col):
-    return composite(
-        DateRange,
-        start_col,
-        end_col,
-        timezone_col,
-    )
+    return composite(DateRange, start_col, end_col, timezone_col)
 
 
 def _ticket_quantity_composite(value_col):
-    return composite(
-        TicketQuantity,
-        value_col,
-    )
+    return composite(TicketQuantity, value_col)
 
 
 def _attendee_info_composite(name_col, email_col, phone_col):
-    return composite(
-        AttendeeInfo,
-        name_col,
-        email_col,
-        phone_col,
-    )
+    return composite(AttendeeInfo, name_col, email_col, phone_col)
+
+
+def _seat_prices_composite(seat_prices_col):
+    """Composite for seat prices stored as JSON (section -> price_cents)."""
+
+    def _make_seat_prices(prices_json):
+        if not prices_json:
+            return {}
+        # Convert price_cents to Money
+        result = {}
+        for section, price_cents in prices_json.items():
+            result[section] = Money(amount=Decimal(price_cents) / 100, currency=Currency.EUR)
+        return result
+
+    return composite(_make_seat_prices, seat_prices_col)
 
 
 def _seats_composite(seats_col):
     """Composite for list of seats stored as JSON."""
+
     def _make_seats(seats_json):
         if not seats_json:
             return []
         return [Seat(**s) for s in seats_json]
-    
+
     def _seats_to_json(seats):
         if not seats:
             return None
         return [{"section": s.section, "row": s.row, "number": s.number} for s in seats]
-    
-    return composite(
-        _make_seats,
-        seats_col,
-    )
+
+    return composite(_make_seats, seats_col)
+
 
 # Order mapper
 mapper_registry.map_imperatively(
@@ -248,9 +288,7 @@ mapper_registry.map_imperatively(
         "url": plans_table.c.url,
         "image_url": plans_table.c.image_url,
         "date_range": _date_range_composite(
-            plans_table.c.start_date,
-            plans_table.c.end_date,
-            plans_table.c.timezone,
+            plans_table.c.start_date, plans_table.c.end_date, plans_table.c.timezone
         ),
         "venue_name": plans_table.c.venue_name,
         "venue_city": plans_table.c.venue_city,
@@ -263,6 +301,7 @@ mapper_registry.map_imperatively(
         "version": plans_table.c.version,
     },
 )
+
 
 # Outbox mapper
 @mapper_registry.mapped
@@ -278,12 +317,12 @@ class OutboxEvent:
 
 def start_mappers():
     """Initialize all mappers. Call once at startup."""
-    pass  # Mappers are registered via decorators and map_imperatively calls
+    # Mappers are registered via decorators and map_imperatively calls
 
 
 if __name__ == "__main__":
     # Quick test
     from sqlalchemy import create_engine
+
     engine = create_engine("postgresql://localhost/test", echo=True)
     mapper_registry.metadata.create_all(engine)
-    print("Tables created successfully")

@@ -1,12 +1,14 @@
 """Flask middleware for observability (correlation ID, request logging)."""
 
 import uuid
-from flask import Flask, Request, g, request
+
+from flask import Flask, g, request
+
 from observability.logging import (
-    get_logger,
-    set_correlation_id,
     clear_correlation_id,
     get_correlation_id,
+    get_logger,
+    set_correlation_id,
 )
 
 logger = get_logger(__name__)
@@ -14,16 +16,16 @@ logger = get_logger(__name__)
 
 def init_observability(app: Flask) -> None:
     """Initialize observability middleware for Flask app."""
-    
+
     @app.before_request
     def before_request() -> None:
         # Generate or extract correlation ID
         correlation_id = request.headers.get("X-Correlation-ID") or str(uuid.uuid4())
         set_correlation_id(correlation_id)
-        
+
         # Store in Flask g for access in routes
         g.correlation_id = correlation_id
-        
+
         # Add to response headers
         # (will be set in after_request)
 
@@ -42,7 +44,7 @@ def init_observability(app: Flask) -> None:
         correlation_id = get_correlation_id()
         if correlation_id:
             response.headers["X-Correlation-ID"] = correlation_id
-        
+
         # Log response
         logger.info(
             "request_completed",
@@ -51,7 +53,7 @@ def init_observability(app: Flask) -> None:
             status_code=response.status_code,
             correlation_id=correlation_id,
         )
-        
+
         clear_correlation_id()
         return response
 

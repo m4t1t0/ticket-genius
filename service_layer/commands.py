@@ -1,21 +1,10 @@
 """Service layer commands (write operations)."""
-from dataclasses import dataclass
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Optional, List
-from uuid import UUID, uuid4
 
-from domain.value_objects import Money, Currency, TicketQuantity, AttendeeInfo, Seat, SeatId
-from domain.models import Order, Payment, Plan
-from domain.events import (
-    OrderCreated, PaymentInitiated, PaymentConfirmed,
-    PaymentFailed, OrderConfirmed, OrderCancelled
-)
-from domain.repositories import (
-    OrderRepository, PaymentRepository, PlanRepository,
-    OrderReadRepository, PlanReadRepository,
-    PlanSearchQuery
-)
+from dataclasses import dataclass
+from datetime import datetime
+from uuid import UUID
+
+from domain.value_objects import AttendeeInfo, Money, Seat, SeatId
 
 
 @dataclass
@@ -23,7 +12,7 @@ class CreateOrderCommand:
     plan_id: UUID
     quantity: int
     attendee_info: AttendeeInfo
-    seat_ids: List[SeatId] = None  # Will be validated against plan
+    seat_ids: list[SeatId] = None  # Will be validated against plan
 
 
 @dataclass
@@ -42,13 +31,13 @@ class CancelOrderCommand:
 @dataclass
 class RefundOrderCommand:
     order_id: UUID
-    amount: Optional[Money] = None
+    amount: Money | None = None
     reason: str = "Customer request"
 
 
 @dataclass
 class SyncPlansCommand:
-    since: Optional[datetime] = None
+    since: datetime | None = None
     stale_only: bool = False
 
 
@@ -78,7 +67,7 @@ class PaymentConfirmedResult:
 @dataclass
 class PlanSearchResult:
     plans: list
-    cursor: Optional[str]
+    cursor: str | None
     has_more: bool
 
 
@@ -88,7 +77,7 @@ class PlanDetail:
     tm_plan_id: str
     name: str
     url: str
-    image_url: Optional[str]
+    image_url: str | None
     date_range: object
     venue_name: str
     venue_city: str
@@ -109,6 +98,6 @@ class OrderStatusResult:
     total_amount: float
     currency: str
     seats: list
-    payment_id: Optional[UUID]
+    payment_id: UUID | None
     created_at: str
     updated_at: str

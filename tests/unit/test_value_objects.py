@@ -1,7 +1,11 @@
 """Tests for domain value objects."""
-import pytest
+
+from datetime import UTC
 from decimal import Decimal
-from domain.value_objects import Money, Currency, Seat, DateRange, TicketQuantity, AttendeeInfo
+
+import pytest
+
+from domain.value_objects import AttendeeInfo, Currency, DateRange, Money, Seat, TicketQuantity
 
 
 class TestMoney:
@@ -52,39 +56,42 @@ class TestMoney:
 
 class TestSeat:
     def test_create_valid(self):
-        seat = Seat(section="A", row="1", number="10")
+        seat = Seat.from_string("A-1-10")
         assert seat.section == "A"
         assert seat.row == "1"
         assert seat.number == "10"
 
     def test_empty_section_raises(self):
         with pytest.raises(ValueError, match="required"):
-            Seat(section="", row="1", number="10")
+            Seat.from_string("-1-10")
 
     def test_repr(self):
-        seat = Seat(section="A", row="1", number="10")
+        seat = Seat.from_string("A-1-10")
         assert "Seat" in repr(seat)
 
 
 class TestDateRange:
     def test_create_valid(self):
-        from datetime import datetime, timezone
-        start = datetime(2026, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+        from datetime import datetime
+
+        start = datetime(2026, 1, 1, 20, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC)
         dr = DateRange(start=start, end=end, timezone="Europe/Madrid")
         assert dr.timezone == "Europe/Madrid"
 
     def test_start_after_end_raises(self):
-        from datetime import datetime, timezone
-        start = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
+        from datetime import datetime
+
+        start = datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 1, 1, 20, 0, 0, tzinfo=UTC)
         with pytest.raises(ValueError, match="start must be before end"):
             DateRange(start=start, end=end, timezone="UTC")
 
     def test_empty_timezone_raises(self):
-        from datetime import datetime, timezone
-        start = datetime(2026, 1, 1, 20, 0, 0, tzinfo=timezone.utc)
-        end = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+        from datetime import datetime
+
+        start = datetime(2026, 1, 1, 20, 0, 0, tzinfo=UTC)
+        end = datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC)
         with pytest.raises(ValueError, match="timezone is required"):
             DateRange(start=start, end=end, timezone="")
 

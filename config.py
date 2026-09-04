@@ -1,7 +1,6 @@
 """Application configuration using Pydantic Settings v2."""
 
 from functools import lru_cache
-from typing import Optional
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -27,10 +26,7 @@ class RedisSettings(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="REDIS_")
 
-    url: str = Field(
-        default="redis://localhost:6379/0",
-        description="Redis connection URL",
-    )
+    url: str = Field(default="redis://localhost:6379/0", description="Redis connection URL")
     max_connections: int = Field(default=20, description="Max Redis connections")
     socket_timeout: int = Field(default=5, description="Socket timeout in seconds")
     socket_connect_timeout: int = Field(default=5, description="Socket connect timeout")
@@ -53,7 +49,9 @@ class TicketmasterSettings(BaseSettings):
         description="Ticketmaster OAuth token URL",
     )
     rate_limit_capacity: int = Field(default=5, description="Token bucket capacity")
-    rate_limit_refill_rate: float = Field(default=5.0, description="Token bucket refill rate per second")
+    rate_limit_refill_rate: float = Field(
+        default=5.0, description="Token bucket refill rate per second"
+    )
     request_timeout: float = Field(default=10.0, description="HTTP request timeout in seconds")
     connect_timeout: float = Field(default=30.0, description="HTTP connect timeout in seconds")
     max_retries: int = Field(default=3, description="Max retry attempts")
@@ -66,31 +64,34 @@ class PaymentSettings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="PAYMENT_")
 
     test_mode: bool = Field(default=True, description="Use simulated payment adapter")
-    stripe_api_key: Optional[str] = Field(default=None, description="Stripe API key (for production)")
-    stripe_webhook_secret: Optional[str] = Field(default=None, description="Stripe webhook secret")
-    failure_threshold_cents: int = Field(default=10000, description="Amount in cents that triggers simulated failure")
+    stripe_api_key: str | None = Field(default=None, description="Stripe API key (for production)")
+    stripe_webhook_secret: str | None = Field(default=None, description="Stripe webhook secret")
+    failure_threshold_cents: int = Field(
+        default=10000, description="Amount in cents that triggers simulated failure"
+    )
 
 
 class AppSettings(BaseSettings):
     """Main application settings."""
 
     model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
+        env_file=".env", env_file_encoding="utf-8", case_sensitive=False, extra="ignore"
     )
 
     # App
     name: str = Field(default="Ticket Genius", description="Application name")
     version: str = Field(default="0.1.0", description="Application version")
-    env: str = Field(default="development", description="Environment (development, staging, production)")
+    env: str = Field(
+        default="development", description="Environment (development, staging, production)"
+    )
     debug: bool = Field(default=False, description="Debug mode")
     host: str = Field(default="0.0.0.0", description="Host to bind")
     port: int = Field(default=5000, description="Port to bind")
 
     # Security
-    secret_key: str = Field(default="dev-secret-change-in-production", description="Secret key for sessions/JWT")
+    secret_key: str = Field(
+        default="dev-secret-change-in-production", description="Secret key for sessions/JWT"
+    )
     cors_origins: list[str] = Field(default=["*"], description="Allowed CORS origins")
 
     # Nested settings
@@ -102,7 +103,7 @@ class AppSettings(BaseSettings):
     # Observability
     log_level: str = Field(default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR)")
     log_format: str = Field(default="json", description="Log format (json, console)")
-    otel_endpoint: Optional[str] = Field(default=None, description="OpenTelemetry OTLP endpoint")
+    otel_endpoint: str | None = Field(default=None, description="OpenTelemetry OTLP endpoint")
     otel_service_name: str = Field(default="ticket-genius", description="OTel service name")
     metrics_enabled: bool = Field(default=True, description="Enable Prometheus metrics")
 

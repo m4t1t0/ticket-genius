@@ -1,22 +1,18 @@
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from enum import Enum
-from typing import List, Optional
-from uuid import UUID, uuid4, uuid5, NAMESPACE_URL
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
-from domain.events import (
-    DomainEvent, OrderCreated, PaymentInitiated, PaymentConfirmed,
-    PaymentFailed, OrderConfirmed, OrderCancelled
-)
-from domain.value_objects import AttendeeInfo, Money, Seat, TicketQuantity, Currency
+from domain.events import DomainEvent, OrderCancelled, OrderConfirmed, OrderCreated
+from domain.value_objects import AttendeeInfo, Currency, Money, Seat, TicketQuantity
 
 
 class AggregateRoot:
     def __init__(self):
-        self._domain_events: List[DomainEvent] = []
+        self._domain_events: list[DomainEvent] = []
 
     @property
-    def domain_events(self) -> List[DomainEvent]:
+    def domain_events(self) -> list[DomainEvent]:
         return self._domain_events
 
     def add_domain_event(self, event: DomainEvent) -> None:
@@ -44,15 +40,15 @@ class Order(AggregateRoot):
     total_amount: Money
     attendee_info: AttendeeInfo
     status: OrderStatus = OrderStatus.PENDING
-    payment_id: Optional[UUID] = None
-    seats: List[Seat] = field(default_factory=list)
+    payment_id: UUID | None = None
+    seats: list[Seat] = field(default_factory=list)
     version: int = 1
 
     def __post_init__(self):
         if not isinstance(self.status, OrderStatus):
             raise ValueError(f"Invalid order status: {self.status}")
         # Initialize domain events list for dataclass inheritance
-        if not hasattr(self, '_domain_events'):
+        if not hasattr(self, "_domain_events"):
             self._domain_events = []
 
     @classmethod
@@ -83,7 +79,7 @@ class Order(AggregateRoot):
         )
         return order
 
-    def reserve_seats(self, seats: List[Seat]) -> None:
+    def reserve_seats(self, seats: list[Seat]) -> None:
         if self.status != OrderStatus.PENDING:
             raise ValueError(f"Cannot reserve seats in status {self.status}")
         if len(seats) != self.quantity.value:
@@ -105,29 +101,23 @@ class Order(AggregateRoot):
         self.status = OrderStatus.PAID
         self.version += 1
 
-    def fulfill(self, tickets: List[dict]) -> None:
+    def fulfill(self, tickets: list[dict]) -> None:
         if self.status != OrderStatus.PAID:
             raise ValueError(f"Cannot fulfill in status {self.status}")
         self.status = OrderStatus.FULFILLED
         self.version += 1
-        self.add_domain_event(
-            OrderConfirmed(
-                order_id=self.order_id,
-                tickets=tickets,
-            )
-        )
+        self.add_domain_event(OrderConfirmed(order_id=self.order_id, tickets=tickets))
 
     def cancel(self, reason: str) -> None:
-        if self.status not in (OrderStatus.PENDING, OrderStatus.SEATS_RESERVED, OrderStatus.PAYMENT_INITIATED):
+        if self.status not in (
+            OrderStatus.PENDING,
+            OrderStatus.SEATS_RESERVED,
+            OrderStatus.PAYMENT_INITIATED,
+        ):
             raise ValueError(f"Cannot cancel in status {self.status}")
         self.status = OrderStatus.CANCELLED
         self.version += 1
-        self.add_domain_event(
-            OrderCancelled(
-                order_id=self.order_id,
-                reason=reason,
-            )
-        )
+        self.add_domain_event(OrderCancelled(order_id=self.order_id, reason=reason))
 
     def refund(self) -> None:
         if self.status not in (OrderStatus.PAID, OrderStatus.FULFILLED):
@@ -155,24 +145,18 @@ class Payment(AggregateRoot):
     amount: Money
     provider: str
     status: PaymentStatus = PaymentStatus.CREATED
-    provider_ref: Optional[str] = None
-    intent_id: Optional[str] = None
+    provider_ref: str | None = None
+    intent_id: str | None = None
     version: int = 1
 
     def __post_init__(self):
         if not isinstance(self.status, PaymentStatus):
             raise ValueError(f"Invalid payment status: {self.status}")
-        if not hasattr(self, '_domain_events'):
+        if not hasattr(self, "_domain_events"):
             self._domain_events = []
 
     @classmethod
-    def create(
-        cls,
-        order_id: UUID,
-        amount: Money,
-        provider: str,
-        intent_id: str,
-    ) -> "Payment":
+    def create(cls, order_id: UUID, amount: Money, provider: str, intent_id: str) -> "Payment":
         payment = cls(
             payment_id=uuid4(),
             order_id=order_id,
@@ -201,7 +185,7 @@ class Payment(AggregateRoot):
         self.status = PaymentStatus.FAILED
         self.version += 1
 
-    def refund(self, amount: Optional[Money] = None) -> None:
+    def refund(self, amount: Money | None = None) -> None:
         if self.status != PaymentStatus.CAPTURED:
             raise ValueError(f"Cannot refund in status {self.status}")
         if amount is None or amount.amount >= self.amount.amount:
@@ -220,7 +204,7 @@ class Plan(AggregateRoot):
     _tm_plan_id: str  # Private: used for ORM mapping, not part of domain API
     name: str
     url: str
-    image_url: Optional[str]
+    image_url: str | None
     date_range: object  # DateRange from value_objects
     venue_name: str
     venue_city: str
@@ -235,17 +219,17 @@ class Plan(AggregateRoot):
     def __post_init__(self):
         if not self._tm_plan_id:
             raise ValueError("tm_plan_id is required")
-        if not hasattr(self, '_domain_events'):
+        if not hasattr(self, "_domain_events"):
             self._domain_events = []
 
     # Note: _tm_plan_id is intentionally private - only adapters/ORM should access it.
-# Domain code should not depend on Ticketmaster-specific identifiers.
-# Adapters needing TM plan ID should access _tm_plan_id directly (Python convention).
+    # Domain code should not depend on Ticketmaster-specific identifiers.
+    # Adapters needing TM plan ID should access _tm_plan_id directly (Python convention).
 
     @property
     def seat_prices(self) -> dict:
         """Get seat prices as dict of section -> Money.
-        
+
         Converts from JSON storage format (price_cents) to domain format (Money).
         """
         result = {}
@@ -262,7 +246,7 @@ class Plan(AggregateRoot):
 
     def get_seat_price(self, seat: Seat) -> Money:
         """Get price for a specific seat.
-        
+
         Falls back to min_price if no specific section pricing available.
         """
         section_price = self.seat_prices.get(seat.section)
@@ -270,19 +254,19 @@ class Plan(AggregateRoot):
             return section_price
         return self.min_price
 
-    def calculate_total_for_seats(self, seats: List[Seat]) -> Money:
+    def calculate_total_for_seats(self, seats: list[Seat]) -> Money:
         """Calculate total price for a list of seats."""
-        total = Money(Decimal('0'), self.min_price.currency)
+        total = Money(Decimal("0"), self.min_price.currency)
         for seat in seats:
             total = total + self.get_seat_price(seat)
         return total
 
     @classmethod
     def from_ticketmaster(cls, tm_data: dict) -> "Plan":
-        from domain.value_objects import DateRange, Money, Currency
         from datetime import datetime
         from decimal import Decimal
-        from uuid import UUID, uuid5, NAMESPACE_URL
+
+        from domain.value_objects import Currency, DateRange, Money
 
         # Parse TM date
         start_str = tm_data["dates"]["start"]["dateTime"]
@@ -313,11 +297,9 @@ class Plan(AggregateRoot):
             min_price=min_price,
             max_price=max_price,
             seat_prices_json={},  # TM doesn't provide per-section pricing
-            last_synced_at=datetime.now(timezone.utc),
+            last_synced_at=datetime.now(UTC),
             tm_last_modified=datetime.fromisoformat(tm_data["lastUpdated"].replace("Z", "+00:00")),
         )
-
-    
 
     def __repr__(self) -> str:
         return f"Plan(id={self.plan_id}, tm_id={self._tm_plan_id}, name={self.name}, version={self.version})"

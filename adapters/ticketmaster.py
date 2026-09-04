@@ -1,17 +1,29 @@
 """Ticketmaster Discovery API adapter."""
-import time
+
 import hashlib
 import json
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from decimal import Decimal
+from typing import Any
 from urllib.parse import urlencode
 
 import httpx
 from redis import Redis
 
-from domain.value_objects import Money, Currency, DateRange
-from domain.exceptions import PlanNotFoundError, ProviderError, ProviderRateLimitedError, ProviderAuthenticationError
+from domain.exceptions import (
+    PlanNotFoundError,
+    ProviderAuthenticationError,
+    ProviderError,
+    ProviderRateLimitedError,
+)
 from domain.repositories import PlanSearchPort
+from domain.value_objects import Currency, Money
+
+
+class RetryableError(Exception):
+    """Exception raised when an HTTP request should be retried."""
 
 
 class TokenBucket:
@@ -40,24 +52,46 @@ class TokenBucket:
         return wait_time
 
 
+@dataclass
+class SearchParams:
+    """Parameters for searching plans."""
+
+    query: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    radius_km: int | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    min_price: float | None = None
+    max_price: float | None = None
+    page: int = 0
+    size: int = 20
+
+
 class TicketmasterAdapter(PlanSearchPort):
     """Adapter for Ticketmaster Discovery API v2.
 
     Note: The Discovery API v2 uses the same base URL for both sandbox and production.
     The environment is determined by the API credentials (client_id/client_secret).
     Sandbox credentials are obtained from the Ticketmaster Developer Portal.
-    
+
     Implements PlanSearchPort for external provider search.
     """
 
     BASE_URL = "https://app.ticketmaster.com/discovery/v2"
     OAUTH_URL = "https://oauth.ticketmaster.com/oauth/token"
 
+    # HTTP status code constants
+    HTTP_TOO_MANY_REQUESTS = 429
+    HTTP_INTERNAL_SERVER_ERROR = 500
+    HTTP_NOT_FOUND = 404
+    HTTP_UNAUTHORIZED = 401
+
     def __init__(
         self,
         client_id: str,
         client_secret: str,
-        redis_client: Optional[Redis] = None,
+        redis_client: Redis | None = None,
         sandbox: bool = True,
     ):
         self.client_id = client_id
@@ -66,12 +100,11 @@ class TicketmasterAdapter(PlanSearchPort):
         self.sandbox = sandbox
 
         self._http_client = httpx.Client(
-            base_url=self.BASE_URL,
-            timeout=httpx.Timeout(10.0, connect=30.0),
+            base_url=self.BASE_URL, timeout=httpx.Timeout(10.0, connect=30.0)
         )
 
         self._rate_limiter = TokenBucket(capacity=5, refill_rate=5.0)
-        self._access_token: Optional[str] = None
+        self._access_token: str | None = None
         self._token_expires_at: float = 0
 
     def _get_access_token(self) -> str:
@@ -98,14 +131,31 @@ class TicketmasterAdapter(PlanSearchPort):
 
         return self._access_token
 
+    def _handle_http_error(self, e: httpx.HTTPStatusError, attempt: int, max_retries: int) -> None:
+        """Handle HTTP status errors and raise appropriate domain exceptions."""
+        status = e.response.status_code
+        HTTP_NOT_FOUND = 404
+        HTTP_UNAUTHORIZED = 401
+        HTTP_TOO_MANY_REQUESTS = 429
+        HTTP_INTERNAL_SERVER_ERROR = 500
+
+        if status == HTTP_NOT_FOUND:
+            raise PlanNotFoundError("Plan not found") from e
+        if status == HTTP_UNAUTHORIZED:
+            raise ProviderAuthenticationError("Ticketmaster") from e
+        if status == HTTP_TOO_MANY_REQUESTS:
+            retry_after = int(e.response.headers.get("Retry-After", "60"))
+            raise ProviderRateLimitedError("Ticketmaster", retry_after=retry_after) from e
+        if status >= HTTP_INTERNAL_SERVER_ERROR:
+            # Don't raise here, let the caller handle retry logic
+            raise RetryableError("Server error") from e
+        raise ProviderError("Ticketmaster", str(e)) from e
+
     def _make_request(
-        self,
-        method: str,
-        path: str,
-        params: Optional[Dict] = None,
-        use_cache: bool = True,
-    ) -> Dict[str, Any]:
+        self, method: str, path: str, params: dict | None = None, use_cache: bool = True
+    ) -> dict[str, Any]:
         """Make HTTP request with rate limiting, caching, and retries."""
+
         params = params or {}
         params["apikey"] = self.client_id
 
@@ -133,14 +183,14 @@ class TicketmasterAdapter(PlanSearchPort):
                     headers={"Authorization": f"Bearer {self._get_access_token()}"},
                 )
 
-                if response.status_code == 429:
+                if response.status_code == self.HTTP_TOO_MANY_REQUESTS:
                     retry_after = int(response.headers.get("Retry-After", "60"))
                     time.sleep(min(retry_after, 60))
                     continue
 
-                if response.status_code >= 500:
+                if response.status_code >= self.HTTP_INTERNAL_SERVER_ERROR:
                     if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
+                        time.sleep(2**attempt)
                         continue
 
                 response.raise_for_status()
@@ -153,87 +203,71 @@ class TicketmasterAdapter(PlanSearchPort):
                 return data
 
             except httpx.HTTPStatusError as e:
-                if e.response.status_code == 404:
-                    raise PlanNotFoundError("Plan not found")
-                if e.response.status_code == 401:
-                    raise ProviderAuthenticationError("Ticketmaster")
-                if e.response.status_code == 429:
-                    retry_after = int(e.response.headers.get("Retry-After", "60"))
-                    raise ProviderRateLimitedError("Ticketmaster", retry_after=retry_after)
-                if e.response.status_code >= 500 and attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                    continue
-                raise ProviderError("Ticketmaster", str(e))
+                try:
+                    self._handle_http_error(e, attempt, max_retries)
+                except RetryableError:
+                    if attempt < max_retries - 1:
+                        time.sleep(2**attempt)
+                        continue
+                    raise
 
         raise ProviderError("Ticketmaster", "Max retries exceeded")
 
-    def _cache_key(self, method: str, path: str, params: Dict) -> str:
+    def _cache_key(self, method: str, path: str, params: dict) -> str:
         """Generate cache key for request."""
         # Normalize params for consistent hashing
         normalized = {k: v for k, v in sorted(params.items()) if k != "apikey"}
         key_str = f"{method}:{path}:{urlencode(normalized)}"
         return f"tm:search:{hashlib.sha256(key_str.encode()).hexdigest()[:32]}"
 
-    def search_plans(
-        self,
-        query: Optional[str] = None,
-        lat: Optional[float] = None,
-        lon: Optional[float] = None,
-        radius_km: Optional[int] = None,
-        date_from: Optional[str] = None,
-        date_to: Optional[str] = None,
-        min_price: Optional[float] = None,
-        max_price: Optional[float] = None,
-        page: int = 0,
-        size: int = 20,
-    ) -> List[Dict[str, Any]]:
+    def search_plans(self, params: SearchParams) -> list[dict[str, Any]]:
         """Search for plans/events."""
-        params = {"page": page, "size": min(size, 100)}
+        params = {"page": params.page, "size": min(params.size, 100)}
 
-        if query:
-            params["keyword"] = query
-        if lat is not None and lon is not None:
-            params["latlong"] = f"{lat},{lon}"
-        if radius_km is not None:
-            params["radius"] = radius_km
+        if params.query:
+            params["keyword"] = params.query
+        if params.lat is not None and params.lon is not None:
+            params["latlong"] = f"{params.lat},{params.lon}"
+        if params.radius_km is not None:
+            params["radius"] = params.radius_km
             params["unit"] = "km"
-        if date_from:
-            params["startDateTime"] = date_from
-        if date_to:
-            params["endDateTime"] = date_to
-        if min_price is not None:
-            params["minPrice"] = int(min_price * 100)
-        if max_price is not None:
-            params["maxPrice"] = int(max_price * 100)
+        if params.date_from:
+            params["startDateTime"] = params.date_from
+        if params.date_to:
+            params["endDateTime"] = params.date_to
+        if params.min_price is not None:
+            params["minPrice"] = int(params.min_price * 100)
+        if params.max_price is not None:
+            params["maxPrice"] = int(params.max_price * 100)
 
         response = self._make_request("GET", "/events.json", params, use_cache=True)
 
         events = response.get("_embedded", {}).get("events", [])
-        
+
         # Cache individual events from search results
         for event in events:
             self._cache_event(event)
-        
+
         return events
 
-    def get_plan(self, plan_id: str) -> Optional[Dict[str, Any]]:
+    def get_plan(self, plan_id: str) -> dict[str, Any] | None:
         """Get single plan by ID."""
         # Try cache first
         cached = self.get_cached_event(plan_id)
         if cached:
             return cached
-        
+
         try:
             response = self._make_request("GET", f"/events/{plan_id}.json", use_cache=True)
-            # Cache the response
-            self._cache_event(response)
-            return response
         except PlanNotFoundError:
             return None
+        else:
+            self._cache_event(response)
+            return response
 
     # --- Event cache methods (tm:event:{id}) ---
 
-    def _cache_event(self, event_data: Dict[str, Any]) -> None:
+    def _cache_event(self, event_data: dict[str, Any]) -> None:
         """Cache event data with key tm:event:{id}."""
         if not self.redis:
             return
@@ -243,7 +277,7 @@ class TicketmasterAdapter(PlanSearchPort):
         cache_key = f"tm:event:{event_id}"
         self.redis.setex(cache_key, 300, json.dumps(event_data))  # 5 min TTL
 
-    def get_cached_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+    def get_cached_event(self, event_id: str) -> dict[str, Any] | None:
         """Get event from cache by ID."""
         if not self.redis:
             return None
@@ -288,12 +322,8 @@ class TicketmasterAdapter(PlanSearchPort):
                     break
 
     def create_order(
-        self,
-        plan_id: str,
-        quantity: int,
-        seat_ids: List[str],
-        idempotency_key: str,
-    ) -> Dict[str, Any]:
+        self, plan_id: str, quantity: int, seat_ids: list[str], idempotency_key: str
+    ) -> dict[str, Any]:
         """Create order/offer with Ticketmaster Commerce API.
 
         Uses idempotency key to prevent duplicate orders.
@@ -326,7 +356,9 @@ class TicketmasterAdapter(PlanSearchPort):
 
         return result
 
-    def accept_offer(self, offer_id: str, idempotency_key: str, seat_ids: Optional[List[str]] = None) -> Dict[str, Any]:
+    def accept_offer(
+        self, offer_id: str, idempotency_key: str, seat_ids: list[str] | None = None
+    ) -> dict[str, Any]:
         """Accept Ticketmaster offer (simulated for sandbox).
 
         Uses idempotency key to prevent duplicate acceptances.
@@ -366,13 +398,10 @@ class TicketmasterAdapter(PlanSearchPort):
     def update_plan_from_ticketmaster(self, plan, tm_data: dict) -> None:
         """
         Update a Plan aggregate from Ticketmaster data.
-        
+
         This logic belongs in the adapter, not the domain aggregate,
         to maintain the Provider-Agnostic Domain principle.
         """
-        from decimal import Decimal
-        from datetime import datetime, timezone
-        
         plan.name = tm_data["name"]
         plan.url = tm_data["url"]
         plan.image_url = tm_data["images"][0]["url"] if tm_data.get("images") else None
@@ -382,9 +411,34 @@ class TicketmasterAdapter(PlanSearchPort):
         price_range = tm_data.get("priceRanges", [{}])[0]
         plan.min_price = Money(Decimal(str(price_range.get("min", 0))), Currency.EUR)
         plan.max_price = Money(Decimal(str(price_range.get("max", 0))), Currency.EUR)
-        plan.last_synced_at = datetime.now(timezone.utc)
-        plan.tm_last_modified = datetime.fromisoformat(tm_data["lastUpdated"].replace("Z", "+00:00"))
+        plan.last_synced_at = datetime.now(UTC)
+        plan.tm_last_modified = datetime.fromisoformat(
+            tm_data["lastUpdated"].replace("Z", "+00:00")
+        )
         plan.version += 1
         # TM doesn't provide per-section pricing, keep existing or initialize empty
-        if not hasattr(plan, 'seat_prices_json') or plan.seat_prices_json is None:
+        if not hasattr(plan, "seat_prices_json") or plan.seat_prices_json is None:
             plan.seat_prices_json = {}
+
+    def acquire_seat_holds(self, plan_id: str, seat_ids: list[str], order_id: str) -> bool:
+        """
+        Acquire seat holds in Redis using SETNX with TTL.
+        Returns True if all seats acquired, False if any seat already held.
+        """
+        if not self.redis:
+            return True  # No Redis, skip hold (for testing)
+
+        acquired = []
+        for seat_id in seat_ids:
+            key = f"SEAT_HOLD:{plan_id}:{seat_id}"
+            # Use SET NX EX for atomic acquire with TTL
+            result = self.redis.set(key, str(order_id), nx=True, ex=600)  # 10 min TTL
+            if result:
+                acquired.append(seat_id)
+            else:
+                # Failed to acquire, release any already acquired
+                for acquired_seat in acquired:
+                    release_key = f"SEAT_HOLD:{plan_id}:{acquired_seat}"
+                    self.redis.delete(release_key)
+                return False
+        return True

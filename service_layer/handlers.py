@@ -1,48 +1,37 @@
 """Service layer handlers (business logic)."""
-from datetime import datetime, timezone
-from decimal import Decimal
-from typing import Optional, List
-from uuid import UUID, uuid4
 
-from domain.models import Order, Payment, Plan
-from domain.value_objects import Money, Currency, TicketQuantity, Seat, AttendeeInfo
-from domain.events import (
-    OrderCreated, PaymentInitiated, PaymentConfirmed,
-    PaymentFailed, OrderConfirmed, OrderCancelled
-)
+from datetime import UTC, datetime
+from uuid import UUID
+
 from domain.exceptions import (
-    OrderNotFoundError,
-    OrderInvalidStatusError,
-    InsufficientInventoryError,
-    SeatMismatchError,
-    PaymentNotFoundError,
-    PaymentDeclinedError,
-    PlanNotFoundError,
-    ValidationError,
     IdempotencyKeyUsedError,
+    InsufficientInventoryError,
+    OrderNotFoundError,
+    PaymentDeclinedError,
+    PaymentNotFoundError,
+    PlanNotFoundError,
+    SeatMismatchError,
 )
+from domain.models import Order, Payment, Plan
 from domain.repositories import PlanSearchPort
-
+from domain.value_objects import Currency, Money, Seat, TicketQuantity
 from service_layer.commands import (
-    CreateOrderCommand, ConfirmPaymentCommand, CancelOrderCommand,
-    RefundOrderCommand, ReserveSeatsCommand, SyncPlansCommand,
-    OrderCreatedResult, PaymentConfirmedResult
-)
-from service_layer.queries import (
-    SearchPlansQuery, GetOrderQuery, ListOrdersQuery, GetPlanQuery,
-    PlanSearchResult, OrderStatusResult
+    CancelOrderCommand,
+    ConfirmPaymentCommand,
+    CreateOrderCommand,
+    OrderCreatedResult,
+    PaymentConfirmedResult,
+    RefundOrderCommand,
 )
 from service_layer.fulfillment import FulfillOrderService
-from service_layer.seat_holds import (
-    acquire_seat_holds,
-    release_seat_holds,
-    check_payment_idempotency,
+from service_layer.queries import (
+    GetOrderQuery,
+    GetPlanQuery,
+    ListOrdersQuery,
+    PlanSearchResult,
+    SearchPlansQuery,
 )
-from domain.repositories import (
-    OrderRepository, PaymentRepository, PlanRepository,
-    OrderReadRepository, PlanReadRepository,
-    PlanSearchQuery
-)
+from service_layer.seat_holds import check_payment_idempotency, release_seat_holds
 
 
 class OrderCommandHandler:
@@ -59,28 +48,28 @@ class OrderCommandHandler:
     def handle_create_order(self, cmd: CreateOrderCommand) -> OrderCreatedResult:
         with self._uow:
             plan = self._get_plan_or_raise(cmd.plan_id)
-            
+
             seats = self._parse_seats(cmd.seat_ids)
             quantity = TicketQuantity(cmd.quantity)
             total_amount = self._calculate_total(plan, seats, cmd.quantity)
-            
+
             order = Order.create(
                 plan_id=cmd.plan_id,
                 quantity=quantity,
                 total_amount=total_amount,
                 attendee_info=cmd.attendee_info,
             )
-            
+
             if seats:
                 self._validate_seat_count(quantity, seats)
                 self._acquire_seat_holds(cmd.plan_id, seats, order.order_id)
                 order.reserve_seats(seats)
-            
+
             payment, intent = self._create_payment_and_intent(order, total_amount)
             order.initiate_payment(payment.payment_id)
-            
+
             self._save_order_and_payment(order, payment)
-            
+
             return OrderCreatedResult(
                 order_id=order.order_id,
                 payment_intent_id=intent.id,
@@ -94,42 +83,33 @@ class OrderCommandHandler:
             raise PlanNotFoundError(str(plan_id))
         return plan
 
-    def _parse_seats(self, seat_ids: Optional[List[SeatId]]) -> List[Seat]:
+    def _parse_seats(self, seat_ids: list[SeatId] | None) -> list[Seat]:
         seats = []
         if seat_ids:
             for seat_id in seat_ids:
                 seats.append(seat_id.to_seat())
         return seats
 
-    def _calculate_total(self, plan: Plan, seats: List[Seat], quantity: int) -> Money:
+    def _calculate_total(self, plan: Plan, seats: list[Seat], quantity: int) -> Money:
         if seats:
             return plan.calculate_total_for_seats(seats)
         return plan.min_price * quantity
 
-    def _validate_seat_count(self, quantity: TicketQuantity, seats: List[Seat]) -> None:
+    def _validate_seat_count(self, quantity: TicketQuantity, seats: list[Seat]) -> None:
         if len(seats) != quantity.value:
             raise SeatMismatchError(expected=quantity.value, got=len(seats))
 
-    def _acquire_seat_holds(self, plan_id: UUID, seats: List[Seat], order_id: UUID) -> None:
+    def _acquire_seat_holds(self, plan_id: UUID, seats: list[Seat], order_id: UUID) -> None:
         seat_ids = [f"{s.section}-{s.row}-{s.number}" for s in seats]
-        if not acquire_seat_holds(self._fulfillment._tm.redis, plan_id, seat_ids, order_id):
-            raise InsufficientInventoryError(
-                str(plan_id),
-                len(seats),
-                len(seats) - 1,
-            )
+        if not self._fulfillment._tm.acquire_seat_holds(plan_id, seat_ids, order_id):
+            raise InsufficientInventoryError(str(plan_id), len(seats), len(seats) - 1)
 
     def _create_payment_and_intent(self, order: Order, total_amount: Money) -> tuple:
         payment = Payment.create(
-            order_id=order.order_id,
-            amount=total_amount,
-            provider="simulated",
-            intent_id="",
+            order_id=order.order_id, amount=total_amount, provider="simulated", intent_id=""
         )
         intent = self._payment.create_payment_intent(
-            amount=total_amount,
-            currency=Currency.EUR,
-            metadata={"order_id": str(order.order_id)},
+            amount=total_amount, currency=Currency.EUR, metadata={"order_id": str(order.order_id)}
         )
         payment.intent_id = intent.id
         return payment, intent
@@ -149,8 +129,12 @@ class OrderCommandHandler:
                 raise PaymentNotFoundError(f"Payment for order {cmd.order_id} not found")
 
             # Verify payment confirmation idempotency key
-            idempotency_key = getattr(cmd, 'idempotency_key', None) or f"payment_{payment.payment_id}"
-            if not check_payment_idempotency(self._fulfillment._tm.redis, payment.payment_id, idempotency_key):
+            idempotency_key = (
+                getattr(cmd, "idempotency_key", None) or f"payment_{payment.payment_id}"
+            )
+            if not check_payment_idempotency(
+                self._fulfillment._tm.redis, payment.payment_id, idempotency_key
+            ):
                 raise IdempotencyKeyUsedError(idempotency_key)
 
             # Confirm payment with provider
@@ -159,8 +143,12 @@ class OrderCommandHandler:
                 payment.fail(intent.metadata.get("failure_reason", "Payment failed"))
                 # Release seat holds on payment failure
                 seat_ids = [f"{s.section}-{s.row}-{s.number}" for s in order.seats]
-                release_seat_holds(self._fulfillment._tm.redis, order.plan_id, seat_ids, order.order_id)
-                raise PaymentDeclinedError(str(payment.payment_id), intent.metadata.get("failure_reason", "Payment failed"))
+                release_seat_holds(
+                    self._fulfillment._tm.redis, order.plan_id, seat_ids, order.order_id
+                )
+                raise PaymentDeclinedError(
+                    str(payment.payment_id), intent.metadata.get("failure_reason", "Payment failed")
+                )
 
             # Capture payment
             payment.capture(provider_ref=intent.metadata.get("captured_at", ""))
@@ -235,16 +223,19 @@ class PlanCommandHandler:
 
             for event in events:
                 plan = Plan.from_ticketmaster(event)
-                existing = self._uow.plans.get_by_tm_id(plan._tm_plan_id)  # Adapter-internal: access TM plan ID
-                
+                existing = self._uow.plans.get_by_tm_id(
+                    plan._tm_plan_id
+                )  # Adapter-internal: access TM plan ID
+
                 # If stale_only, skip plans that were synced recently
                 if cmd.stale_only and existing:
-                    from datetime import timedelta, timezone
+                    from datetime import timedelta
+
                     if existing.last_synced_at:
-                        age = datetime.now(timezone.utc) - existing.last_synced_at
+                        age = datetime.now(UTC) - existing.last_synced_at
                         if age < timedelta(hours=stale_threshold_hours):
                             continue  # Skip this plan, it's fresh enough
-                
+
                 if existing:
                     self._tm.update_plan_from_ticketmaster(existing, event)
                 else:
@@ -278,31 +269,32 @@ class QueryHandler:
                 page=0,  # Provider handles pagination internally
                 size=query.limit,
             )
-            
+
             # Convert provider events to PlanSummary using deterministic UUIDs
-            from uuid import uuid5, NAMESPACE_URL
+            from uuid import NAMESPACE_URL, uuid5
+
             from service_layer.queries import PlanSearchResult
-            plans = [PlanSummary(
-                plan_id=uuid5(NAMESPACE_URL, f"ticketmaster.com/events/{e['id']}"),
-                name=e["name"],
-                url=e["url"],
-                image_url=e["images"][0]["url"] if e.get("images") else None,
-                start_date=e["dates"]["start"]["dateTime"][:10],
-                start_time=e["dates"]["start"]["dateTime"][11:16],
-                timezone=e["dates"]["timezone"],
-                venue_name=e["_embedded"]["venues"][0]["name"],
-                venue_city=e["_embedded"]["venues"][0]["city"]["name"],
-                venue_state=e["_embedded"]["venues"][0]["state"]["name"],
-                min_price=float(e.get("priceRanges", [{}])[0].get("min", 0)),
-                max_price=float(e.get("priceRanges", [{}])[0].get("max", 0)),
-                currency=e.get("priceRanges", [{}])[0].get("currency", "EUR"),
-            ) for e in events]
-            
-            return PlanSearchResult(
-                plans=plans,
-                cursor=None,
-                has_more=len(events) == query.limit,
-            )
+
+            plans = [
+                PlanSummary(
+                    plan_id=uuid5(NAMESPACE_URL, f"ticketmaster.com/events/{e['id']}"),
+                    name=e["name"],
+                    url=e["url"],
+                    image_url=e["images"][0]["url"] if e.get("images") else None,
+                    start_date=e["dates"]["start"]["dateTime"][:10],
+                    start_time=e["dates"]["start"]["dateTime"][11:16],
+                    timezone=e["dates"]["timezone"],
+                    venue_name=e["_embedded"]["venues"][0]["name"],
+                    venue_city=e["_embedded"]["venues"][0]["city"]["name"],
+                    venue_state=e["_embedded"]["venues"][0]["state"]["name"],
+                    min_price=float(e.get("priceRanges", [{}])[0].get("min", 0)),
+                    max_price=float(e.get("priceRanges", [{}])[0].get("max", 0)),
+                    currency=e.get("priceRanges", [{}])[0].get("currency", "EUR"),
+                )
+                for e in events
+            ]
+
+            return PlanSearchResult(plans=plans, cursor=None, has_more=len(events) == query.limit)
 
     def handle_get_plan(self, query: GetPlanQuery):
         with self._uow:

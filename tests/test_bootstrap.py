@@ -1,4 +1,5 @@
 """Tests for bootstrap wiring and event publishing."""
+
 from items.entrypoints.bootstrap import bootstrap
 from items.service_layer.commands import CreateItem, UpdateItem
 

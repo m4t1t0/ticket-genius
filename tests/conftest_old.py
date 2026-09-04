@@ -1,11 +1,12 @@
 """Pytest configuration for tests using test database."""
+
 import os
+
 import pytest
 from dotenv import load_dotenv
+from items.adapters import orm
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-
-from items.adapters import orm
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -46,6 +47,7 @@ def client(db_session, monkeypatch):
 
     def mock_build_uow(database_url=None):
         from items.adapters.unit_of_work import SqlAlchemyUnitOfWork
+
         return SqlAlchemyUnitOfWork(lambda: db_session)
 
     monkeypatch.setattr("items.entrypoints.bootstrap.build_uow", mock_build_uow)

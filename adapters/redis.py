@@ -1,12 +1,11 @@
 """Redis client factory."""
 
 import os
-from typing import Optional
 
 from redis import Redis
 
 
-def get_redis_client() -> Optional[Redis]:
+def get_redis_client() -> Redis | None:
     """Get Redis client from environment."""
     redis_url = os.getenv("REDIS_URL")
     if redis_url:

@@ -1,12 +1,12 @@
 """Domain exceptions with error codes for RFC 7807 Problem Details."""
 
-from typing import Optional, Any
 from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
 class ErrorCode:
     """Standard error codes for the domain."""
+
     # Plan errors
     PLAN_NOT_FOUND = "PLAN_NOT_FOUND"
     PLAN_STALE = "PLAN_STALE"
@@ -40,10 +40,7 @@ class DomainException(Exception):
     """Base domain exception with error code."""
 
     def __init__(
-        self,
-        message: str,
-        code: str = ErrorCode.VALIDATION_ERROR,
-        details: Optional[dict] = None,
+        self, message: str, code: str = ErrorCode.VALIDATION_ERROR, details: dict | None = None
     ):
         super().__init__(message)
         self.code = code
@@ -53,51 +50,48 @@ class DomainException(Exception):
 class PlanNotFoundError(DomainException):
     """Plan not found."""
 
-    def __init__(self, plan_id: str, details: Optional[dict] = None):
+    def __init__(self, plan_id: str, details: dict | None = None):
         super().__init__(
-            f"Plan {plan_id} not found",
-            code=ErrorCode.PLAN_NOT_FOUND,
-            details=details,
+            f"Plan {plan_id} not found", code=ErrorCode.PLAN_NOT_FOUND, details=details
         )
 
 
 class PlanStaleError(DomainException):
     """Plan data is stale and needs refresh."""
 
-    def __init__(self, plan_id: str, details: Optional[dict] = None):
+    def __init__(self, plan_id: str, details: dict | None = None):
         super().__init__(
-            f"Plan {plan_id} data is stale",
-            code=ErrorCode.PLAN_STALE,
-            details=details,
+            f"Plan {plan_id} data is stale", code=ErrorCode.PLAN_STALE, details=details
         )
 
 
 class OrderNotFoundError(DomainException):
     """Order not found."""
 
-    def __init__(self, order_id: str, details: Optional[dict] = None):
+    def __init__(self, order_id: str, details: dict | None = None):
         super().__init__(
-            f"Order {order_id} not found",
-            code=ErrorCode.ORDER_NOT_FOUND,
-            details=details,
+            f"Order {order_id} not found", code=ErrorCode.ORDER_NOT_FOUND, details=details
         )
 
 
 class OrderInvalidStatusError(DomainException):
     """Order is in invalid state for operation."""
 
-    def __init__(self, order_id: str, current_status: str, expected_status: str, details: Optional[dict] = None):
+    def __init__(
+        self, order_id: str, current_status: str, expected_status: str, details: dict | None = None
+    ):
         super().__init__(
             f"Order {order_id} is in status {current_status}, expected {expected_status}",
             code=ErrorCode.ORDER_INVALID_STATUS,
-            details=details or {"current_status": current_status, "expected_status": expected_status},
+            details=details
+            or {"current_status": current_status, "expected_status": expected_status},
         )
 
 
 class InsufficientInventoryError(DomainException):
     """Not enough inventory/seats available."""
 
-    def __init__(self, plan_id: str, requested: int, available: int, details: Optional[dict] = None):
+    def __init__(self, plan_id: str, requested: int, available: int, details: dict | None = None):
         super().__init__(
             f"Insufficient inventory for plan {plan_id}: requested {requested}, available {available}",
             code=ErrorCode.ORDER_INSUFFICIENT_INVENTORY,
@@ -108,7 +102,7 @@ class InsufficientInventoryError(DomainException):
 class SeatMismatchError(DomainException):
     """Seat selection doesn't match quantity."""
 
-    def __init__(self, expected: int, got: int, details: Optional[dict] = None):
+    def __init__(self, expected: int, got: int, details: dict | None = None):
         super().__init__(
             f"Seat mismatch: expected {expected} seats, got {got}",
             code=ErrorCode.ORDER_SEAT_MISMATCH,
@@ -119,18 +113,16 @@ class SeatMismatchError(DomainException):
 class PaymentNotFoundError(DomainException):
     """Payment not found."""
 
-    def __init__(self, payment_id: str, details: Optional[dict] = None):
+    def __init__(self, payment_id: str, details: dict | None = None):
         super().__init__(
-            f"Payment {payment_id} not found",
-            code=ErrorCode.PAYMENT_NOT_FOUND,
-            details=details,
+            f"Payment {payment_id} not found", code=ErrorCode.PAYMENT_NOT_FOUND, details=details
         )
 
 
 class PaymentDeclinedError(DomainException):
     """Payment was declined by provider."""
 
-    def __init__(self, payment_id: str, reason: str, details: Optional[dict] = None):
+    def __init__(self, payment_id: str, reason: str, details: dict | None = None):
         super().__init__(
             f"Payment {payment_id} declined: {reason}",
             code=ErrorCode.PAYMENT_DECLINED,
@@ -141,18 +133,25 @@ class PaymentDeclinedError(DomainException):
 class PaymentInvalidStatusError(DomainException):
     """Payment is in invalid state for operation."""
 
-    def __init__(self, payment_id: str, current_status: str, expected_status: str, details: Optional[dict] = None):
+    def __init__(
+        self,
+        payment_id: str,
+        current_status: str,
+        expected_status: str,
+        details: dict | None = None,
+    ):
         super().__init__(
             f"Payment {payment_id} is in status {current_status}, expected {expected_status}",
             code=ErrorCode.PAYMENT_INVALID_STATUS,
-            details=details or {"current_status": current_status, "expected_status": expected_status},
+            details=details
+            or {"current_status": current_status, "expected_status": expected_status},
         )
 
 
 class IdempotencyKeyUsedError(DomainException):
     """Idempotency key already used."""
 
-    def __init__(self, key: str, details: Optional[dict] = None):
+    def __init__(self, key: str, details: dict | None = None):
         super().__init__(
             f"Idempotency key {key} already used",
             code=ErrorCode.IDEMPOTENCY_KEY_USED,
@@ -163,7 +162,7 @@ class IdempotencyKeyUsedError(DomainException):
 class ProviderError(DomainException):
     """External provider error."""
 
-    def __init__(self, provider: str, message: str, details: Optional[dict] = None):
+    def __init__(self, provider: str, message: str, details: dict | None = None):
         super().__init__(
             f"Provider {provider} error: {message}",
             code=ErrorCode.PROVIDER_ERROR,
@@ -174,7 +173,7 @@ class ProviderError(DomainException):
 class ProviderUnavailableError(DomainException):
     """External provider is unavailable."""
 
-    def __init__(self, provider: str, details: Optional[dict] = None):
+    def __init__(self, provider: str, details: dict | None = None):
         super().__init__(
             f"Provider {provider} is unavailable",
             code=ErrorCode.PROVIDER_UNAVAILABLE,
@@ -185,7 +184,7 @@ class ProviderUnavailableError(DomainException):
 class ProviderRateLimitedError(DomainException):
     """External provider rate limited."""
 
-    def __init__(self, provider: str, retry_after: Optional[int] = None, details: Optional[dict] = None):
+    def __init__(self, provider: str, retry_after: int | None = None, details: dict | None = None):
         super().__init__(
             f"Provider {provider} rate limited",
             code=ErrorCode.PROVIDER_RATE_LIMITED,
@@ -196,7 +195,7 @@ class ProviderRateLimitedError(DomainException):
 class ProviderAuthenticationError(DomainException):
     """Provider authentication failed."""
 
-    def __init__(self, provider: str, details: Optional[dict] = None):
+    def __init__(self, provider: str, details: dict | None = None):
         super().__init__(
             f"Provider {provider} authentication failed",
             code=ErrorCode.PROVIDER_AUTHENTICATION_FAILED,
@@ -207,7 +206,7 @@ class ProviderAuthenticationError(DomainException):
 class ValidationError(DomainException):
     """Input validation error."""
 
-    def __init__(self, message: str, field: Optional[str] = None, details: Optional[dict] = None):
+    def __init__(self, message: str, field: str | None = None, details: dict | None = None):
         super().__init__(
             message,
             code=ErrorCode.VALIDATION_ERROR,
@@ -218,7 +217,7 @@ class ValidationError(DomainException):
 class OptimisticLockError(DomainException):
     """Optimistic locking conflict - entity was modified by another transaction."""
 
-    def __init__(self, entity_type: str, entity_id: str, details: Optional[dict] = None):
+    def __init__(self, entity_type: str, entity_id: str, details: dict | None = None):
         super().__init__(
             f"{entity_type} {entity_id} was modified by another transaction",
             code="OPTIMISTIC_LOCK_ERROR",

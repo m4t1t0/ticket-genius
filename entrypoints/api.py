@@ -1,27 +1,34 @@
 """Flask API routes with OpenAPI documentation."""
-from flask import Blueprint, request, jsonify, abort
-from uuid import UUID
-from datetime import datetime
 
+from datetime import datetime
+from uuid import UUID
+
+from flask import Blueprint, jsonify, request
+from flask_apispec import doc, marshal_with, use_kwargs
+
+from entrypoints.schemas import (
+    CancelOrderRequest,
+    ConfirmPaymentRequest,
+    CreateOrderRequest,
+    ErrorResponse,
+    OrderCreatedResponse,
+    OrderStatusResponse,
+    PaymentConfirmedResponse,
+    PlanDetailResponse,
+    PlanSearchResponse,
+    RefundOrderRequest,
+    SearchPlansRequest,
+    SyncPlansResponse,
+)
 from service_layer import MessageBus
 from service_layer.commands import (
-    CreateOrderCommand, ConfirmPaymentCommand, CancelOrderCommand,
-    RefundOrderCommand, SyncPlansCommand
+    CancelOrderCommand,
+    ConfirmPaymentCommand,
+    CreateOrderCommand,
+    RefundOrderCommand,
+    SyncPlansCommand,
 )
-from service_layer.queries import (
-    SearchPlansQuery, GetOrderQuery, ListOrdersQuery, GetPlanQuery
-)
-from entrypoints.schemas import (
-    CreateOrderRequest, ConfirmPaymentRequest, CancelOrderRequest,
-    RefundOrderRequest, SearchPlansRequest,
-    OrderCreatedResponse, PaymentConfirmedResponse,
-    OrderStatusResponse, PlanSearchResponse, PlanDetailResponse,
-    SyncPlansResponse, ErrorResponse
-)
-
-from apispec import APISpec
-from apispec.ext.marshmallow import MarshmallowPlugin
-from flask_apispec import FlaskApiSpec, marshal_with, use_kwargs, doc
+from service_layer.queries import GetOrderQuery, GetPlanQuery, SearchPlansQuery
 
 
 def register_routes(message_bus: MessageBus) -> Blueprint:
@@ -30,53 +37,63 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
     # Error handlers
     @bp.errorhandler(400)
     def bad_request(e):
-        return jsonify(ErrorResponse(
-            type="https://tools.ietf.org/html/rfc7231#section-6.5.1",
-            title="Bad Request",
-            status=400,
-            detail=str(e),
-            instance=request.path,
-        ).model_dump()), 400
+        return jsonify(
+            ErrorResponse(
+                type="https://tools.ietf.org/html/rfc7231#section-6.5.1",
+                title="Bad Request",
+                status=400,
+                detail=str(e),
+                instance=request.path,
+            ).model_dump()
+        ), 400
 
     @bp.errorhandler(404)
     def not_found(e):
-        return jsonify(ErrorResponse(
-            type="https://tools.ietf.org/html/rfc7231#section-6.5.4",
-            title="Not Found",
-            status=404,
-            detail=str(e),
-            instance=request.path,
-        ).model_dump()), 404
+        return jsonify(
+            ErrorResponse(
+                type="https://tools.ietf.org/html/rfc7231#section-6.5.4",
+                title="Not Found",
+                status=404,
+                detail=str(e),
+                instance=request.path,
+            ).model_dump()
+        ), 404
 
     @bp.errorhandler(500)
     def internal_error(e):
-        return jsonify(ErrorResponse(
-            type="https://tools.ietf.org/html/rfc7231#section-6.6.1",
-            title="Internal Server Error",
-            status=500,
-            detail="An unexpected error occurred",
-            instance=request.path,
-        ).model_dump()), 500
+        return jsonify(
+            ErrorResponse(
+                type="https://tools.ietf.org/html/rfc7231#section-6.6.1",
+                title="Internal Server Error",
+                status=500,
+                detail="An unexpected error occurred",
+                instance=request.path,
+            ).model_dump()
+        ), 500
 
     # Domain exception handlers
     @bp.errorhandler(ValueError)
     def handle_value_error(e):
         # Check if it's a "not found" type error
         if "not found" in str(e).lower():
-            return jsonify(ErrorResponse(
-                type="not_found",
-                title="Not Found",
-                status=404,
+            return jsonify(
+                ErrorResponse(
+                    type="not_found",
+                    title="Not Found",
+                    status=404,
+                    detail=str(e),
+                    instance=request.path,
+                ).model_dump()
+            ), 404
+        return jsonify(
+            ErrorResponse(
+                type="bad_request",
+                title="Bad Request",
+                status=400,
                 detail=str(e),
                 instance=request.path,
-            ).model_dump()), 404
-        return jsonify(ErrorResponse(
-            type="bad_request",
-            title="Bad Request",
-            status=400,
-            detail=str(e),
-            instance=request.path,
-        ).model_dump()), 400
+            ).model_dump()
+        ), 400
 
     # Health check
     @bp.route("/health")
@@ -249,13 +266,15 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
         query = GetOrderQuery(order_id=order_id)
         result = message_bus.handle_query(query)
         if not result:
-            return jsonify(ErrorResponse(
-                type="not_found",
-                title="Order Not Found",
-                status=404,
-                detail=f"Order {order_id} not found",
-                instance=request.path,
-            ).model_dump()), 404
+            return jsonify(
+                ErrorResponse(
+                    type="not_found",
+                    title="Order Not Found",
+                    status=404,
+                    detail=f"Order {order_id} not found",
+                    instance=request.path,
+                ).model_dump()
+            ), 404
         return jsonify(OrderStatusResponse.model_validate(result).model_dump())
 
     @bp.route("/orders/<uuid:order_id>", methods=["DELETE"])
@@ -352,7 +371,8 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
         data = RefundOrderRequest.model_validate(request.get_json())
         amount = None
         if data.amount:
-            from domain.value_objects import Money, Currency
+            from domain.value_objects import Currency, Money
+
             amount = Money(amount=data.amount.amount, currency=Currency(data.amount.currency))
         cmd = RefundOrderCommand(order_id=order_id, amount=amount, reason=data.reason)
         message_bus.handle_command(cmd)
@@ -461,11 +481,13 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
             limit=data.limit,
         )
         result = message_bus.handle_query(query)
-        return jsonify(PlanSearchResponse(
-            plans=[p for p in result],
-            cursor=None,  # TODO: implement cursor
-            has_more=len(result) >= data.limit,
-        ).model_dump())
+        return jsonify(
+            PlanSearchResponse(
+                plans=[p for p in result],
+                cursor=None,  # TODO: implement cursor
+                has_more=len(result) >= data.limit,
+            ).model_dump()
+        )
 
     @bp.route("/plans/<uuid:plan_id>", methods=["GET"])
     @doc(summary="Get plan details", tags=["Plans"])
@@ -504,13 +526,15 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
         query = GetPlanQuery(plan_id=plan_id)
         result = message_bus.handle_query(query)
         if not result:
-            return jsonify(ErrorResponse(
-                type="not_found",
-                title="Plan Not Found",
-                status=404,
-                detail=f"Plan {plan_id} not found",
-                instance=request.path,
-            ).model_dump()), 404
+            return jsonify(
+                ErrorResponse(
+                    type="not_found",
+                    title="Plan Not Found",
+                    status=404,
+                    detail=f"Plan {plan_id} not found",
+                    instance=request.path,
+                ).model_dump()
+            ), 404
         return jsonify(PlanDetailResponse.model_validate(result).model_dump())
 
     # Admin
@@ -560,9 +584,8 @@ def register_routes(message_bus: MessageBus) -> Blueprint:
             stale_only=data.get("stale_only", False),
         )
         synced = message_bus.handle_command(cmd)
-        return jsonify(SyncPlansResponse(
-            synced_count=synced,
-            message=f"Synced {synced} plans",
-        ).model_dump())
+        return jsonify(
+            SyncPlansResponse(synced_count=synced, message=f"Synced {synced} plans").model_dump()
+        )
 
     return bp

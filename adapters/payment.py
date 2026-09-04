@@ -1,11 +1,11 @@
 """Payment adapter (simulated for development)."""
+
 import time
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Dict, Optional
-from uuid import UUID, uuid4
+from uuid import uuid4
 
-from domain.value_objects import Money, Currency
+from domain.value_objects import Currency, Money
 
 
 @dataclass
@@ -14,20 +14,17 @@ class PaymentIntent:
     client_secret: str
     status: str
     amount: Money
-    metadata: Dict
+    metadata: dict
 
 
 class PaymentSimulatorAdapter:
     """Simulated payment adapter for development/testing."""
 
     def __init__(self):
-        self._intents: Dict[str, PaymentIntent] = {}
+        self._intents: dict[str, PaymentIntent] = {}
 
     def create_payment_intent(
-        self,
-        amount: Money,
-        currency: Currency,
-        metadata: Optional[Dict] = None,
+        self, amount: Money, currency: Currency, metadata: dict | None = None
     ) -> PaymentIntent:
         """Create a simulated payment intent."""
         intent_id = f"pi_test_{uuid4().hex[:24]}"
@@ -45,9 +42,7 @@ class PaymentSimulatorAdapter:
         return intent
 
     def confirm_payment(
-        self,
-        payment_intent_id: str,
-        payment_method: str = "pm_card_visa",
+        self, payment_intent_id: str, payment_method: str = "pm_card_visa"
     ) -> PaymentIntent:
         """Confirm a simulated payment."""
         intent = self._intents.get(payment_intent_id)
@@ -65,19 +60,17 @@ class PaymentSimulatorAdapter:
 
         return intent
 
-    def get_payment_intent(self, payment_intent_id: str) -> Optional[PaymentIntent]:
+    def get_payment_intent(self, payment_intent_id: str) -> PaymentIntent | None:
         """Get payment intent by ID."""
         return self._intents.get(payment_intent_id)
 
 
 class PaymentNotFoundError(Exception):
     """Payment intent not found."""
-    pass
 
 
 class PaymentProviderError(Exception):
     """Payment provider error."""
-    pass
 
 
 # For future Stripe integration:

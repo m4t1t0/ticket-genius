@@ -1,6 +1,6 @@
 """Unit tests for the Items domain model."""
-import pytest
 
+import pytest
 from items.domain.events import ItemCreated, ItemUpdated
 from items.domain.model import Item
 from items.domain.value_objects import Description, Name

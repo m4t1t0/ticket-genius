@@ -1,10 +1,9 @@
 """Pydantic schemas for request/response validation."""
-from datetime import datetime
+
 from decimal import Decimal
-from typing import Optional, List
 from uuid import UUID
 
-from pydantic import BaseModel, Field, EmailStr, ConfigDict
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class MoneySchema(BaseModel):
@@ -21,7 +20,7 @@ class SeatSchema(BaseModel):
 class AttendeeInfoSchema(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
     email: EmailStr
-    phone: Optional[str] = None
+    phone: str | None = None
 
 
 # Request schemas
@@ -29,7 +28,7 @@ class CreateOrderRequest(BaseModel):
     plan_id: UUID
     quantity: int = Field(..., ge=1, le=8)
     attendee_info: AttendeeInfoSchema
-    seat_ids: Optional[List[str]] = None
+    seat_ids: list[str] | None = None
 
 
 class ConfirmPaymentRequest(BaseModel):
@@ -42,20 +41,20 @@ class CancelOrderRequest(BaseModel):
 
 
 class RefundOrderRequest(BaseModel):
-    amount: Optional[MoneySchema] = None
+    amount: MoneySchema | None = None
     reason: str = "Customer request"
 
 
 class SearchPlansRequest(BaseModel):
-    query: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    radius_km: Optional[int] = Field(None, ge=1, le=500)
-    date_from: Optional[str] = None  # ISO format
-    date_to: Optional[str] = None
-    min_price: Optional[float] = None
-    max_price: Optional[float] = None
-    cursor: Optional[str] = None
+    query: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    radius_km: int | None = Field(None, ge=1, le=500)
+    date_from: str | None = None  # ISO format
+    date_to: str | None = None
+    min_price: float | None = None
+    max_price: float | None = None
+    cursor: str | None = None
     limit: int = Field(20, ge=1, le=100)
 
 
@@ -65,7 +64,7 @@ class PlanSummaryResponse(BaseModel):
     tm_plan_id: str
     name: str
     url: str
-    image_url: Optional[str]
+    image_url: str | None
     start_date: str
     start_time: str
     timezone: str
@@ -84,7 +83,7 @@ class PlanDetailResponse(BaseModel):
     tm_plan_id: str
     name: str
     url: str
-    image_url: Optional[str]
+    image_url: str | None
     date_range: dict
     venue_name: str
     venue_city: str
@@ -92,7 +91,7 @@ class PlanDetailResponse(BaseModel):
     min_price: float
     max_price: float
     currency: str
-    seat_map: List[dict]
+    seat_map: list[dict]
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -119,15 +118,15 @@ class OrderStatusResponse(BaseModel):
     quantity: int
     total_amount: float
     currency: str
-    seats: List[dict]
-    payment_id: Optional[UUID]
+    seats: list[dict]
+    payment_id: UUID | None
     created_at: str
     updated_at: str
 
 
 class PlanSearchResponse(BaseModel):
-    plans: List[PlanSummaryResponse]
-    cursor: Optional[str]
+    plans: list[PlanSummaryResponse]
+    cursor: str | None
     has_more: bool
 
 
@@ -136,7 +135,7 @@ class ErrorResponse(BaseModel):
     title: str
     status: int
     detail: str
-    instance: Optional[str] = None
+    instance: str | None = None
 
 
 class SyncPlansResponse(BaseModel):

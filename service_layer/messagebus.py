@@ -1,26 +1,23 @@
 """Message bus for command/query dispatching using singledispatch."""
 
 from functools import singledispatch
-from typing import Any, Union
+from typing import Any
 
 from service_layer.commands import (
-    CreateOrderCommand, ConfirmPaymentCommand, CancelOrderCommand,
-    RefundOrderCommand, SyncPlansCommand, ReserveSeatsCommand,
+    CancelOrderCommand,
+    ConfirmPaymentCommand,
+    CreateOrderCommand,
+    RefundOrderCommand,
+    ReserveSeatsCommand,
+    SyncPlansCommand,
 )
-from service_layer.queries import (
-    SearchPlansQuery, GetOrderQuery, ListOrdersQuery, GetPlanQuery,
-)
+from service_layer.queries import GetOrderQuery, GetPlanQuery, ListOrdersQuery, SearchPlansQuery
 
 
 class MessageBus:
     """Dispatches commands and queries to appropriate handlers using singledispatch."""
 
-    def __init__(
-        self,
-        order_handler,
-        plan_handler,
-        query_handler,
-    ):
+    def __init__(self, order_handler, plan_handler, query_handler):
         self._order_handler = order_handler
         self._plan_handler = plan_handler
         self._query_handler = query_handler
@@ -38,6 +35,7 @@ class MessageBus:
         """Check database connectivity."""
         try:
             from sqlalchemy import text
+
             uow = self._order_handler._uow
             with uow:
                 uow.session.execute(text("SELECT 1"))

@@ -1,15 +1,13 @@
 """Write repository implementations."""
 
-from typing import List, Optional
 from uuid import UUID
 
+from sqlalchemy import text, update
 from sqlalchemy.orm import Session
 
 from adapters.orm import Order, Payment, Plan
-from domain.repositories import (
-    OrderRepository, PaymentRepository, PlanRepository,
-)
 from domain.exceptions import OptimisticLockError
+from domain.repositories import OrderRepository, PaymentRepository, PlanRepository
 
 
 class SqlAlchemyOrderRepository(OrderRepository):
@@ -19,15 +17,15 @@ class SqlAlchemyOrderRepository(OrderRepository):
     def add(self, order: Order) -> None:
         self._session.add(order)
 
-    def get(self, order_id: UUID) -> Optional[Order]:
+    def get(self, order_id: UUID) -> Order | None:
         return self._session.get(Order, str(order_id))
 
-    def get_by_payment_id(self, payment_id: UUID) -> Optional[Order]:
+    def get_by_payment_id(self, payment_id: UUID) -> Order | None:
         return self._session.query(Order).filter_by(payment_id=str(payment_id)).first()
 
     def update(self, order: Order) -> None:
         """Update order with optimistic locking."""
-        from sqlalchemy import update, text
+
         stmt = (
             update(Order.__table__)
             .where(Order.order_id == str(order.order_id))
@@ -52,15 +50,15 @@ class SqlAlchemyPaymentRepository(PaymentRepository):
     def add(self, payment: Payment) -> None:
         self._session.add(payment)
 
-    def get(self, payment_id: UUID) -> Optional[Payment]:
+    def get(self, payment_id: UUID) -> Payment | None:
         return self._session.get(Payment, str(payment_id))
 
-    def get_by_order_id(self, order_id: UUID) -> Optional[Payment]:
+    def get_by_order_id(self, order_id: UUID) -> Payment | None:
         return self._session.query(Payment).filter_by(order_id=str(order_id)).first()
 
     def update(self, payment: Payment) -> None:
         """Update payment with optimistic locking."""
-        from sqlalchemy import update, text
+
         stmt = (
             update(Payment.__table__)
             .where(Payment.payment_id == str(payment.payment_id))
@@ -85,15 +83,15 @@ class SqlAlchemyPlanRepository(PlanRepository):
     def add(self, plan: Plan) -> None:
         self._session.add(plan)
 
-    def get(self, plan_id: UUID) -> Optional[Plan]:
+    def get(self, plan_id: UUID) -> Plan | None:
         return self._session.get(Plan, str(plan_id))
 
-    def get_by_tm_id(self, tm_plan_id: str) -> Optional[Plan]:
+    def get_by_tm_id(self, tm_plan_id: str) -> Plan | None:
         return self._session.query(Plan).filter_by(_tm_plan_id=tm_plan_id).first()
 
     def update(self, plan: Plan) -> None:
         """Update plan with optimistic locking."""
-        from sqlalchemy import update, text
+
         stmt = (
             update(Plan.__table__)
             .where(Plan.plan_id == str(plan.plan_id))

@@ -1,8 +1,21 @@
 """Tests for domain aggregates."""
-import pytest
-from datetime import datetime, timezone, timedelta
+
 from uuid import uuid4
-from domain import Order, Payment, Plan, Money, TicketQuantity, AttendeeInfo, Seat, Currency, OrderStatus, PaymentStatus
+
+import pytest
+
+from domain import (
+    AttendeeInfo,
+    Currency,
+    Money,
+    Order,
+    OrderStatus,
+    Payment,
+    PaymentStatus,
+    Plan,
+    Seat,
+    TicketQuantity,
+)
 
 
 class TestOrder:
@@ -25,10 +38,7 @@ class TestOrder:
 
     def test_reserve_seats(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [
-            Seat(section="A", row="1", number="10"),
-            Seat(section="A", row="1", number="11"),
-        ]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         assert order.status == OrderStatus.SEATS_RESERVED
         assert order.seats == seats
@@ -36,13 +46,13 @@ class TestOrder:
 
     def test_reserve_seats_wrong_count_raises(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10")]  # Only 1 seat for qty=2
+        seats = [Seat.from_string("A-1-10")]  # Only 1 seat for qty=2
         with pytest.raises(ValueError, match="Expected 2 seats"):
             order.reserve_seats(seats)
 
     def test_initiate_payment(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
 
         payment_id = uuid4()
@@ -53,7 +63,7 @@ class TestOrder:
 
     def test_confirm_payment(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         order.initiate_payment(uuid4())
 
@@ -63,12 +73,15 @@ class TestOrder:
 
     def test_fulfill(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         order.initiate_payment(uuid4())
         order.confirm_payment()
 
-        tickets = [{"ticket_id": "t1", "seat": str(seats[0])}, {"ticket_id": "t2", "seat": str(seats[1])}]
+        tickets = [
+            {"ticket_id": "t1", "seat": str(seats[0])},
+            {"ticket_id": "t2", "seat": str(seats[1])},
+        ]
         order.fulfill(tickets)
         assert order.status == OrderStatus.FULFILLED
         assert order.version == 5
@@ -83,14 +96,14 @@ class TestOrder:
 
     def test_cancel_from_seats_reserved(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         order.cancel("Customer request")
         assert order.status == OrderStatus.CANCELLED
 
     def test_cancel_from_paid_raises(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         order.initiate_payment(uuid4())
         order.confirm_payment()
@@ -99,7 +112,7 @@ class TestOrder:
 
     def test_refund_from_paid(self, valid_order_data):
         order = Order.create(**valid_order_data)
-        seats = [Seat(section="A", row="1", number="10"), Seat(section="A", row="1", number="11")]
+        seats = [Seat.from_string("A-1-10"), Seat.from_string("A-1-11")]
         order.reserve_seats(seats)
         order.initiate_payment(uuid4())
         order.confirm_payment()
@@ -189,11 +202,9 @@ class TestPlan:
                 "timezone": "Europe/Madrid",
             },
             "_embedded": {
-                "venues": [{
-                    "name": "Test Venue",
-                    "city": {"name": "Madrid"},
-                    "state": {"name": "Madrid"},
-                }]
+                "venues": [
+                    {"name": "Test Venue", "city": {"name": "Madrid"}, "state": {"name": "Madrid"}}
+                ]
             },
             "priceRanges": [{"min": 50, "max": 150}],
             "lastUpdated": "2026-01-01T00:00:00Z",
@@ -210,6 +221,7 @@ class TestPlan:
 
     def test_update_from_ticketmaster(self, tm_data):
         from adapters.ticketmaster import TicketmasterAdapter
+
         plan = Plan.from_ticketmaster(tm_data)
         old_version = plan.version
         old_last_synced = plan.last_synced_at
@@ -223,7 +235,7 @@ class TestPlan:
         # Use adapter without Redis for testing
         adapter = TicketmasterAdapter(client_id="test", client_secret="test", redis_client=None)
         adapter.update_plan_from_ticketmaster(plan, tm_data)
-        
+
         assert plan.name == "Updated Concert"
         assert plan.min_price.amount == 60
         assert plan.max_price.amount == 160

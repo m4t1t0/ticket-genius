@@ -1,26 +1,10 @@
 """SQLAlchemy Unit of Work implementation."""
-from contextlib import contextmanager
-from typing import Generator, List, Optional
-from uuid import UUID
 
-from sqlalchemy import create_engine, event, or_, and_, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from adapters.orm import mapper_registry, OutboxEvent
-from domain.models import Order, Payment, Plan
-from domain.repositories import (
-    OrderRepository, PaymentRepository, PlanRepository,
-    OrderReadRepository, PlanReadRepository,
-    PlanSearchQuery, PlanSummary, PlanDetail, OrderSummary, OrderStatusDetail
-)
-from domain.events import (
-    OrderCreated, PaymentInitiated, PaymentConfirmed,
-    PaymentFailed, OrderConfirmed, OrderCancelled
-)
-from domain.exceptions import (
-    OptimisticLockError,
-)
-from service_layer.cursor import apply_cursor_filter, get_next_cursor
+from adapters.orm import OutboxEvent
+from adapters.repositories_read import SqlAlchemyOrderReadRepository, SqlAlchemyPlanReadRepository
 
 # Import separated repository implementations
 from adapters.repositories_write import (
@@ -28,22 +12,14 @@ from adapters.repositories_write import (
     SqlAlchemyPaymentRepository,
     SqlAlchemyPlanRepository,
 )
-from adapters.repositories_read import (
-    SqlAlchemyOrderReadRepository,
-    SqlAlchemyPlanReadRepository,
-)
 
 
 class SqlAlchemyUnitOfWork:
     def __init__(self, database_url: str):
         self._engine = create_engine(database_url, echo=False)
         self._session_factory = sessionmaker(bind=self._engine, expire_on_commit=False)
-        self._session: Optional[Session] = None
-        self._domain_events: List = []
-
-        # Initialize mappers
-        from adapters.orm import start_mappers
-        start_mappers()
+        self._session: Session | None = None
+        self._domain_events: list = []
 
     @property
     def session(self) -> Session:
@@ -87,11 +63,11 @@ class SqlAlchemyUnitOfWork:
         """Collect domain events from all loaded aggregates."""
         # Only check new and dirty objects, not the entire session
         for obj in self.session.new:
-            if hasattr(obj, 'domain_events'):
+            if hasattr(obj, "domain_events"):
                 self._domain_events.extend(obj.domain_events)
                 obj.clear_domain_events()
         for obj in self.session.dirty:
-            if hasattr(obj, 'domain_events'):
+            if hasattr(obj, "domain_events"):
                 self._domain_events.extend(obj.domain_events)
                 obj.clear_domain_events()
 
@@ -99,7 +75,7 @@ class SqlAlchemyUnitOfWork:
         """Write collected domain events to outbox table."""
         for event in self._domain_events:
             outbox_event = OutboxEvent(
-                aggregate_id=event.aggregate_id if hasattr(event, 'aggregate_id') else None,
+                aggregate_id=event.aggregate_id if hasattr(event, "aggregate_id") else None,
                 aggregate_type=type(event).__name__,
                 event_type=type(event).__name__,
                 payload=self._serialize_event(event),
@@ -110,11 +86,11 @@ class SqlAlchemyUnitOfWork:
         """Serialize domain event to JSON-compatible dict."""
         data = {}
         for key, value in event.__dict__.items():
-            if key.startswith('_'):
+            if key.startswith("_"):
                 continue
-            if hasattr(value, 'isoformat'):  # datetime
+            if hasattr(value, "isoformat"):  # datetime
                 data[key] = value.isoformat()
-            elif hasattr(value, '__dict__'):  # nested object
+            elif hasattr(value, "__dict__"):  # nested object
                 data[key] = str(value)
             else:
                 data[key] = value

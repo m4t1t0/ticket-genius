@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Optional
 from enum import Enum
 
 
@@ -18,7 +17,7 @@ class Money:
 
     def __post_init__(self):
         if not isinstance(self.amount, Decimal):
-            object.__setattr__(self, 'amount', Decimal(str(self.amount)))
+            object.__setattr__(self, "amount", Decimal(str(self.amount)))
         if self.amount < 0:
             raise ValueError("Money amount cannot be negative")
         if self.amount.as_tuple().exponent < -2:
@@ -44,35 +43,10 @@ class Money:
         return f"Money({self.amount:.2f} {self.currency.value})"
 
 
-@dataclass
-class Seat:
-    section: str
-    row: str
-    number: str
-
-    def __post_init__(self):
-        if not self.section or not self.row or not self.number:
-            raise ValueError("Seat section, row, and number are required")
-
-    def __composite_values__(self):
-        return (self.section, self.row, self.number)
-
-    def __repr__(self) -> str:
-        return f"Seat(section={self.section}, row={self.row}, number={self.number})"
-
-    def to_id(self) -> "SeatId":
-        """Convert to SeatId."""
-        return SeatId(self.section, self.row, self.number)
-
-    @classmethod
-    def from_id(cls, seat_id: "SeatId") -> "Seat":
-        """Create Seat from SeatId."""
-        return cls(section=seat_id.section, row=seat_id.row, number=seat_id.number)
-
-
 @dataclass(frozen=True)
 class SeatId:
     """Immutable seat identifier in format 'section-row-number'."""
+
     section: str
     row: str
     number: str
@@ -92,9 +66,47 @@ class SeatId:
             raise ValueError(f"Invalid SeatId format: {s}. Expected 'section-row-number'")
         return cls(section=parts[0], row=parts[1], number=parts[2])
 
-    def to_seat(self) -> Seat:
-        """Convert to Seat value object."""
-        return Seat(section=self.section, row=self.row, number=self.number)
+    def __composite_values__(self):
+        return (self.section, self.row, self.number)
+
+    def __repr__(self) -> str:
+        return f"SeatId(section={self.section}, row={self.row}, number={self.number})"
+
+
+@dataclass
+class Seat:
+    """Mutable seat entity with a SeatId."""
+
+    seat_id: SeatId
+
+    def __post_init__(self):
+        if not isinstance(self.seat_id, SeatId):
+            raise ValueError("Seat must have a SeatId")
+
+    @property
+    def section(self) -> str:
+        return self.seat_id.section
+
+    @property
+    def row(self) -> str:
+        return self.seat_id.row
+
+    @property
+    def number(self) -> str:
+        return self.seat_id.number
+
+    @classmethod
+    def from_string(cls, s: str) -> "Seat":
+        """Create Seat from string format 'section-row-number'."""
+        return cls(seat_id=SeatId.from_string(s))
+
+    @classmethod
+    def from_parts(cls, section: str, row: str, number: str) -> "Seat":
+        """Create Seat from parts."""
+        return cls(seat_id=SeatId(section=section, row=row, number=number))
+
+    def __repr__(self) -> str:
+        return f"Seat(seat_id={self.seat_id})"
 
 
 @dataclass(frozen=True)
@@ -132,7 +144,7 @@ class TicketQuantity:
 class AttendeeInfo:
     name: str
     email: str
-    phone: Optional[str] = None
+    phone: str | None = None
 
     def __post_init__(self):
         if not self.name or not self.name.strip():

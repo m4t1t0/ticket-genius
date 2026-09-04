@@ -1,23 +1,22 @@
 """Service layer queries (read operations)."""
-from dataclasses import dataclass
-from typing import Optional, List
-from uuid import UUID
-from datetime import datetime
 
-from domain.repositories import PlanSearchQuery, PlanSummary, PlanDetail, OrderSummary, OrderStatusDetail
+from dataclasses import dataclass
+from uuid import UUID
+
+from domain.repositories import OrderStatusDetail, OrderSummary, PlanSummary
 
 
 @dataclass
 class SearchPlansQuery:
-    query: Optional[str] = None
-    lat: Optional[float] = None
-    lon: Optional[float] = None
-    radius_km: Optional[int] = None
-    date_from: Optional[str] = None
-    date_to: Optional[str] = None
-    min_price: Optional[float] = None
-    max_price: Optional[float] = None
-    cursor: Optional[str] = None
+    query: str | None = None
+    lat: float | None = None
+    lon: float | None = None
+    radius_km: int | None = None
+    date_from: str | None = None
+    date_to: str | None = None
+    min_price: float | None = None
+    max_price: float | None = None
+    cursor: str | None = None
     limit: int = 20
 
 
@@ -29,7 +28,7 @@ class GetOrderQuery:
 @dataclass
 class ListOrdersQuery:
     customer_email: str
-    cursor: Optional[str] = None
+    cursor: str | None = None
     limit: int = 20
 
 
@@ -40,16 +39,16 @@ class GetPlanQuery:
 
 @dataclass
 class PlanSearchResult:
-    plans: List[PlanSummary]
-    cursor: Optional[str]
+    plans: list[PlanSummary]
+    cursor: str | None
     has_more: bool
 
 
 @dataclass
 class OrderSummaryResult:
-    order: Optional[OrderSummary]
+    order: OrderSummary | None
 
 
 @dataclass
 class OrderStatusResult:
-    order: Optional[OrderStatusDetail]
+    order: OrderStatusDetail | None

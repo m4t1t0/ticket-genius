@@ -2,19 +2,19 @@
 
 from dependency_injector import containers, providers
 
-from config import get_settings
 from adapters import (
+    PaymentSimulatorAdapter,
     SqlAlchemyUnitOfWork,
     TicketmasterAdapter,
-    PaymentSimulatorAdapter,
     get_redis_client,
 )
+from config import get_settings
 from service_layer import (
+    FulfillOrderService,
+    MessageBus,
     OrderCommandHandler,
     PlanCommandHandler,
     QueryHandler,
-    MessageBus,
-    FulfillOrderService,
 )
 
 
@@ -28,14 +28,11 @@ class Container(containers.DeclarativeContainer):
     settings = providers.Singleton(get_settings)
 
     # Infrastructure
-    redis_client = providers.Factory(
-        get_redis_client,
-    )
+    redis_client = providers.Factory(get_redis_client)
 
     # Database
     unit_of_work = providers.Factory(
-        SqlAlchemyUnitOfWork,
-        database_url=settings.provided.database.url,
+        SqlAlchemyUnitOfWork, database_url=settings.provided.database.url
     )
 
     # External adapters
@@ -47,15 +44,10 @@ class Container(containers.DeclarativeContainer):
         sandbox=settings.provided.ticketmaster.sandbox,
     )
 
-    payment_adapter = providers.Factory(
-        PaymentSimulatorAdapter,
-    )
+    payment_adapter = providers.Factory(PaymentSimulatorAdapter)
 
     # Service layer handlers
-    fulfillment_service = providers.Factory(
-        FulfillOrderService,
-        tm_adapter=ticketmaster_adapter,
-    )
+    fulfillment_service = providers.Factory(FulfillOrderService, tm_adapter=ticketmaster_adapter)
 
     order_command_handler = providers.Factory(
         OrderCommandHandler,
@@ -65,15 +57,11 @@ class Container(containers.DeclarativeContainer):
     )
 
     plan_command_handler = providers.Factory(
-        PlanCommandHandler,
-        uow=unit_of_work,
-        tm_adapter=ticketmaster_adapter,
+        PlanCommandHandler, uow=unit_of_work, tm_adapter=ticketmaster_adapter
     )
 
     query_handler = providers.Factory(
-        QueryHandler,
-        uow=unit_of_work,
-        search_port=ticketmaster_adapter,
+        QueryHandler, uow=unit_of_work, search_port=ticketmaster_adapter
     )
 
     # Message bus

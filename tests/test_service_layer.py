@@ -1,6 +1,6 @@
 """Unit tests for the Items service layer, using in-memory adapters."""
-import pytest
 
+import pytest
 from items.adapters.unit_of_work import InMemoryUnitOfWork
 from items.domain.exceptions import ItemNotFoundError
 from items.service_layer.commands import CreateItem, DeleteItem, UpdateItem
@@ -53,9 +53,7 @@ class TestUpdateItem:
     def test_updates_description(self, commands):
         item = _create(commands)
 
-        updated = commands.handle_update(
-            UpdateItem(item_id=item.id, description="heavy tool")
-        )
+        updated = commands.handle_update(UpdateItem(item_id=item.id, description="heavy tool"))
 
         assert updated.description.value == "heavy tool"
 

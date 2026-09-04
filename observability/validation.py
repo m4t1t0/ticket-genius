@@ -1,9 +1,9 @@
 """Request/Response validation middleware using Pydantic models."""
 
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Optional, Type
 
-from flask import Request, Response, g, jsonify, request
+from flask import Response, g, jsonify, request
 from pydantic import BaseModel, ValidationError
 
 from domain.exceptions import ValidationError as DomainValidationError
@@ -14,10 +14,10 @@ logger = get_logger(__name__)
 
 class RequestValidator:
     """Validates incoming request data against Pydantic models."""
-    
-    def __init__(self, request_model: Optional[Type[BaseModel]] = None):
+
+    def __init__(self, request_model: type[BaseModel] | None = None):
         self.request_model = request_model
-    
+
     def validate(self, data: dict) -> BaseModel:
         """Validate request data and return model instance."""
         if self.request_model is None:
@@ -26,25 +26,23 @@ class RequestValidator:
             return self.request_model(**data)
         except ValidationError as e:
             raise DomainValidationError(
-                "Request validation failed",
-                field="request_body",
-                details={"errors": e.errors()}
+                "Request validation failed", field="request_body", details={"errors": e.errors()}
             )
 
 
 class ResponseValidator:
     """Validates outgoing response data against Pydantic models."""
-    
-    def __init__(self, response_model: Optional[Type[BaseModel]] = None):
+
+    def __init__(self, response_model: type[BaseModel] | None = None):
         self.response_model = response_model
-    
+
     def validate(self, data: dict) -> dict:
         """Validate response data and return validated dict."""
         if self.response_model is None:
             return data
         try:
             model = self.response_model(**data)
-            return model.model_dump(mode='json')
+            return model.model_dump(mode="json")
         except ValidationError as e:
             logger.error(
                 "Response validation failed",
@@ -55,8 +53,9 @@ class ResponseValidator:
             return data
 
 
-def validate_request(request_model: Type[BaseModel]):
+def validate_request(request_model: type[BaseModel]):
     """Decorator to validate request body against a Pydantic model."""
+
     def decorator(f: Callable):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -66,24 +65,21 @@ def validate_request(request_model: Type[BaseModel]):
                     validated = validator.validate(request.get_json() or {})
                     g.validated_request = validated
                 else:
-                    raise DomainValidationError(
-                        "Request must be JSON",
-                        field="content_type",
-                    )
+                    raise DomainValidationError("Request must be JSON", field="content_type")
             except DomainValidationError:
                 raise
             except Exception as e:
-                raise DomainValidationError(
-                    f"Request parsing failed: {e}",
-                    field="request_body",
-                )
+                raise DomainValidationError(f"Request parsing failed: {e}", field="request_body")
             return f(*args, **kwargs)
+
         return wrapper
+
     return decorator
 
 
-def validate_response(response_model: Type[BaseModel]):
+def validate_response(response_model: type[BaseModel]):
     """Decorator to validate response body against a Pydantic model."""
+
     def decorator(f: Callable):
         @wraps(f)
         def wrapper(*args, **kwargs):
@@ -96,10 +92,10 @@ def validate_response(response_model: Type[BaseModel]):
                 data = result
                 status_code = 200
                 headers = {}
-            
+
             if isinstance(data, Response):
                 return data
-            
+
             validator = ResponseValidator(response_model)
             try:
                 validated_data = validator.validate(data)
@@ -110,7 +106,9 @@ def validate_response(response_model: Type[BaseModel]):
                 # Log but don't fail on response validation in production
                 logger.warning("Response validation error", path=request.path)
                 return jsonify(data), status_code, headers
+
         return wrapper
+
     return decorator
 
 
@@ -118,4 +116,3 @@ def init_validation_middleware(app):
     """Initialize validation middleware for Flask app."""
     # This is a placeholder for global validation middleware
     # Individual routes should use @validate_request/@validate_response decorators
-    pass

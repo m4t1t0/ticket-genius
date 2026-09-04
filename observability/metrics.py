@@ -1,44 +1,27 @@
 """Prometheus metrics for business and technical observability."""
 
-from prometheus_client import Counter, Histogram, Gauge, generate_latest, CONTENT_TYPE_LATEST
 from flask import Response
+from prometheus_client import CONTENT_TYPE_LATEST, Counter, Gauge, Histogram, generate_latest
 
 # Business metrics
-orders_created_total = Counter(
-    "orders_created_total",
-    "Total number of orders created",
-    ["status"],
-)
+orders_created_total = Counter("orders_created_total", "Total number of orders created", ["status"])
 
 payments_succeeded_total = Counter(
-    "payments_succeeded_total",
-    "Total number of successful payments",
+    "payments_succeeded_total", "Total number of successful payments"
 )
 
 payments_failed_total = Counter(
-    "payments_failed_total",
-    "Total number of failed payments",
-    ["reason"],
+    "payments_failed_total", "Total number of failed payments", ["reason"]
 )
 
-orders_cancelled_total = Counter(
-    "orders_cancelled_total",
-    "Total number of cancelled orders",
-)
+orders_cancelled_total = Counter("orders_cancelled_total", "Total number of cancelled orders")
 
-orders_refunded_total = Counter(
-    "orders_refunded_total",
-    "Total number of refunded orders",
-)
+orders_refunded_total = Counter("orders_refunded_total", "Total number of refunded orders")
 
-plans_synced_total = Counter(
-    "plans_synced_total",
-    "Total number of plans synced from Ticketmaster",
-)
+plans_synced_total = Counter("plans_synced_total", "Total number of plans synced from Ticketmaster")
 
 seat_holds_conflicts_total = Counter(
-    "seat_holds_conflicts_total",
-    "Total number of seat hold conflicts",
+    "seat_holds_conflicts_total", "Total number of seat hold conflicts"
 )
 
 # Latency histograms
@@ -75,20 +58,13 @@ db_query_duration_seconds = Histogram(
 )
 
 # Gauges
-active_orders_gauge = Gauge(
-    "active_orders",
-    "Number of orders in non-terminal states",
-)
+active_orders_gauge = Gauge("active_orders", "Number of orders in non-terminal states")
 
 outbox_lag_seconds = Gauge(
-    "outbox_lag_seconds",
-    "Age of oldest unprocessed outbox event in seconds",
+    "outbox_lag_seconds", "Age of oldest unprocessed outbox event in seconds"
 )
 
-redis_connected = Gauge(
-    "redis_connected",
-    "Redis connection status (1=connected, 0=disconnected)",
-)
+redis_connected = Gauge("redis_connected", "Redis connection status (1=connected, 0=disconnected)")
 
 
 def record_order_created(status: str) -> None:

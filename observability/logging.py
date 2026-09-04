@@ -3,18 +3,17 @@
 import contextvars
 import logging
 import sys
-from typing import Optional
 
 import structlog
 from structlog.types import Processor
 
 # Context variable for correlation ID
-correlation_id_var: contextvars.ContextVar[Optional[str]] = contextvars.ContextVar(
+correlation_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "correlation_id", default=None
 )
 
 
-def get_correlation_id() -> Optional[str]:
+def get_correlation_id() -> str | None:
     """Get current correlation ID from context."""
     return correlation_id_var.get()
 
@@ -37,17 +36,12 @@ def add_correlation_id(logger, method_name, event_dict):
     return event_dict
 
 
-def configure_logging(
-    level: str = "INFO",
-    format: str = "json",
-) -> None:
+def configure_logging(level: str = "INFO", format: str = "json") -> None:
     """Configure structlog with standard library logging."""
-    
+
     # Standard library logging setup
     logging.basicConfig(
-        format="%(message)s",
-        stream=sys.stdout,
-        level=getattr(logging, level.upper(), logging.INFO),
+        format="%(message)s", stream=sys.stdout, level=getattr(logging, level.upper(), logging.INFO)
     )
 
     # Shared processors
@@ -64,14 +58,10 @@ def configure_logging(
 
     if format == "json":
         # JSON output for production
-        processors = shared_processors + [
-            structlog.processors.JSONRenderer(),
-        ]
+        processors = shared_processors + [structlog.processors.JSONRenderer()]
     else:
         # Human-readable output for development
-        processors = shared_processors + [
-            structlog.dev.ConsoleRenderer(colors=True),
-        ]
+        processors = shared_processors + [structlog.dev.ConsoleRenderer(colors=True)]
 
     structlog.configure(
         processors=processors,

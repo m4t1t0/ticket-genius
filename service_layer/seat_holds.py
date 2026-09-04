@@ -1,8 +1,6 @@
 """Seat hold utilities for Redis-based seat reservation."""
 
-from typing import List
 from uuid import UUID
-
 
 # Seat hold constants
 SEAT_HOLD_TTL = 600  # 10 minutes in seconds
@@ -13,14 +11,14 @@ PAYMENT_CONFIRM_TTL = 86400  # 24 hours in seconds
 PAYMENT_CONFIRM_PREFIX = "payment_confirm"
 
 
-def acquire_seat_holds(redis, plan_id: UUID, seat_ids: List[str], order_id: UUID) -> bool:
+def acquire_seat_holds(redis, plan_id: UUID, seat_ids: list[str], order_id: UUID) -> bool:
     """
     Acquire seat holds in Redis using SETNX with TTL.
     Returns True if all seats acquired, False if any seat already held.
     """
     if not redis:
         return True  # No Redis, skip hold (for testing)
-    
+
     acquired = []
     for seat_id in seat_ids:
         key = f"{SEAT_HOLD_PREFIX}:{plan_id}:{seat_id}"
@@ -37,7 +35,7 @@ def acquire_seat_holds(redis, plan_id: UUID, seat_ids: List[str], order_id: UUID
     return True
 
 
-def release_seat_holds(redis, plan_id: UUID, seat_ids: List[str], order_id: UUID) -> None:
+def release_seat_holds(redis, plan_id: UUID, seat_ids: list[str], order_id: UUID) -> None:
     """Release seat holds for the given order."""
     if not redis:
         return
