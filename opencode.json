@@ -4,6 +4,7 @@
   "skills": {
     "grilling": ".agents/skills/grilling",
     "grill-with-docs": ".agents/skills/grill-with-docs",
-    "domain-modeling": ".agents/skills/domain-modeling"
+    "domain-modeling": ".agents/skills/domain-modeling",
+    "improve-codebase-architecture": ".agents/skills/improve-codebase-architecture"
   }
 }
